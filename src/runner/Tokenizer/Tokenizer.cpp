@@ -91,8 +91,112 @@ public:
 
 class TokenizerMINICPM : public TokenizerLLaMa
 {
+    std::vector<std::string> split(const std::string &str, const std::string &delimiter)
+    {
+        std::vector<std::string> tokens;
+        size_t start = 0;
+        size_t end = str.find(delimiter);
+
+        while (end != std::string::npos)
+        {
+            tokens.push_back(str.substr(start, end - start));
+            start = end + delimiter.length();
+            end = str.find(delimiter, start);
+        }
+
+        // Add the last token
+        tokens.push_back(str.substr(start, end));
+
+        return tokens;
+    }
+
+    bool contains(const std::string &str, const std::string &substring)
+    {
+        return str.find(substring) != std::string::npos;
+    }
+
 public:
-    std::string Decode(const std::vector<int> input) override
+    bool Encode(std::string input, std::vector<int> &output, bool b_img_prompt = false) override
+    {
+        auto elems = split(input, "\n");
+
+        std::vector<int> tokens;
+
+        for (auto ss : elems)
+        {
+            if (ss=="")
+            {
+                continue;
+            }
+            
+            // ALOGI("%s", ss.c_str());
+            std::vector<int> ss_tokens;
+            if (contains(ss, "</s>"))
+            {
+                auto els = split(ss, "</s>");
+                std::vector<int> tmp;
+                // ALOGE("%s", els[0].c_str());
+                auto ret = sp.Encode(els[0], &tmp);
+                if (!ret.ok())
+                {
+                    ALOGE("%s", ret.error_message());
+                    return false;
+                }
+                tmp.push_back(sp.eos_id());
+                tmp.push_back(59320);
+                tmp.push_back(5);
+                tokens.insert(tokens.end(), tmp.begin(), tmp.end());
+            }
+            else if (contains(ss, "<s>"))
+            {
+                auto els = split(ss, "<s>");
+                std::vector<int> tmp;
+                // ALOGE("%s", els[1].c_str());
+                auto ret = sp.Encode(els[1], &tmp);
+                if (!ret.ok())
+                {
+                    ALOGE("%s", ret.error_message());
+                    return false;
+                }
+                tmp.insert(tmp.begin(), sp.bos_id());
+                tmp.push_back(5);
+                tokens.insert(tokens.end(), tmp.begin(), tmp.end());
+            }
+            else
+            {
+                std::vector<int> tmp;
+                auto ret = sp.Encode(ss, &tmp);
+                if (!ret.ok())
+                {
+                    ALOGE("%s", ret.error_message());
+                    return false;
+                }
+                tmp.push_back(5);
+                tokens.insert(tokens.end(), tmp.begin(), tmp.end());
+            }
+        }
+
+        output = tokens;
+
+        // auto ret = sp.Encode(input, &output);
+        // if (!ret.ok())
+        // {
+        //     ALOGE("%s", ret.error_message());
+        //     return false;
+        // }
+        if (_b_bos)
+        {
+            output.insert(output.begin(), sp.bos_id());
+        }
+        if (_b_eos)
+        {
+            output.push_back(sp.eos_id());
+        }
+        return true;
+    }
+
+    std::string
+    Decode(const std::vector<int> input) override
     {
         sentencepiece::SentencePieceText spt;
         sp.Decode(input, &spt);

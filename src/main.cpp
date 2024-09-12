@@ -28,7 +28,10 @@ std::string prompt_complete(std::string prompt, TokenizerType tokenizer_type)
                    << prompt << "</s><|assistant|>\n";
         break;
     case TKT_MINICPM:
-        oss_prompt << "<用户>" << prompt << "<AI>";
+        oss_prompt << "<s> system\n现在请你扮演元气女友和我进行对话</s>\n";
+        oss_prompt << "<s> user\n"
+                   << prompt << "</s>\n<s> assistant\n";
+
         break;
     case TKT_Phi3:
         oss_prompt << prompt << " ";
