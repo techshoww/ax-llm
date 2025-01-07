@@ -1,7 +1,7 @@
 #include "signal.h"
 
 #include "runner/LLM.hpp"
-
+#include "runner/utils/memory_utils.hpp"
 #include "cmdline.hpp"
 
 static LLM lLaMa;
@@ -34,9 +34,11 @@ std::string prompt_complete(std::string prompt, TokenizerType tokenizer_type)
         oss_prompt << prompt << " ";
         break;
     case TKT_Qwen:
-        oss_prompt << "<|im_start|>system\nYou are a helpful assistant.<|im_end|>";
-        oss_prompt << "\n<|im_start|>user\n"
-                   << prompt << "<|im_end|>\n<|im_start|>assistant\n";
+        // oss_prompt << "<|im_start|>system\nYou are a helpful assistant.<|im_end|>";
+        // oss_prompt << "\n<|im_start|>user\n"
+        //            << prompt << "<|im_end|>\n<|im_start|>assistant\n";
+
+        oss_prompt << "<|im_start|>user\n帮我找一个穿白色上衣黑色裤子的年轻女人的图片<|im_end|>\n<|im_start|>assistant";
         break;
     case TKT_HTTP:
     default:
@@ -107,6 +109,51 @@ int main(int argc, char *argv[])
     if (!lLaMa.Init(attr))
     {
         return -1;
+    }
+
+    {
+        // set cache 
+        std::vector<std::vector<unsigned short>> k_caches;
+        std::vector<std::vector<unsigned short>> v_caches;
+        std::vector<unsigned short> mask;
+
+        for (int i = 0; i < attr.axmodel_num; i++)
+        {
+            char path[256];
+            sprintf(path, "qwen2_1.5B_kvcaches/k_caches_%02d.bin", i);
+            std::vector<char> k_cache;
+            if (!read_file(path, k_cache))
+            {
+                ALOGE("read_file");
+                return -1;
+            }
+            ALOGI("k_cache %s", path);
+            k_caches.push_back(std::vector<unsigned short>(k_cache.size() / sizeof(unsigned short)));
+            memcpy(k_caches.back().data(), k_cache.data(), k_cache.size());
+
+            sprintf(path, "qwen2_1.5B_kvcaches/v_caches_%02d.bin", i);
+            std::vector<char> v_cache;
+            if (!read_file(path, v_cache))
+            {
+                ALOGE("read_file");
+                return -1;
+            }
+            ALOGI("v_cache %s", path);
+            v_caches.push_back(std::vector<unsigned short>(v_cache.size() / sizeof(unsigned short)));
+            memcpy(v_caches.back().data(), v_cache.data(), v_cache.size());
+        }
+
+        std::vector<char> tmp_mask;
+        if (!read_file("qwen2_1.5B_kvcaches/prefill_mask.bin", tmp_mask))
+        {
+            ALOGE("read_file");
+            return -1;
+        }
+        ALOGI("mask %s", "prefill_mask.bin");
+        mask.resize(tmp_mask.size() / sizeof(unsigned short));
+        memcpy(mask.data(), tmp_mask.data(), tmp_mask.size());
+
+        lLaMa.set_cache_inputs(k_caches, v_caches, mask, 1202, 2176);
     }
 
     if (prompt != "")
