@@ -112,7 +112,10 @@ int main(int argc, char *argv[])
     }
 
     {
-        // set cache 
+        // set cache
+        int prefill_len = 128;
+        int precompute_len = 1202;
+        int max_kvcache_num = 2176;
         std::vector<std::vector<unsigned short>> k_caches;
         std::vector<std::vector<unsigned short>> v_caches;
         std::vector<unsigned short> mask;
@@ -153,7 +156,35 @@ int main(int argc, char *argv[])
         mask.resize(tmp_mask.size() / sizeof(unsigned short));
         memcpy(mask.data(), tmp_mask.data(), tmp_mask.size());
 
-        lLaMa.set_cache_inputs(k_caches, v_caches, mask, 1202, 2176);
+        std::vector<unsigned short> mask_2;
+        {
+            int num_token = 21;
+            bfloat16 bf16 = -65536.f;
+            
+            mask_2.resize(1 * prefill_len * (max_kvcache_num + prefill_len), bf16.data);
+            for (size_t i = 0; i < prefill_len; i++)
+            {
+                if (i < num_token)
+                {
+                    int mask_current_start = max_kvcache_num;
+                    auto mask_ptr = mask_2.data() + i * (max_kvcache_num + prefill_len);
+                    for (int j = 0; j < precompute_len; j++)
+                    {
+                        mask_ptr[j] = 0;
+                    }
+                    for (int j = mask_current_start; j < mask_current_start + i + 1; j++)
+                    {
+                        mask_ptr[j] = 0;
+                    }
+                }
+            }
+            if (memcmp(mask.data(), mask_2.data(), mask_2.size() * sizeof(unsigned short)) == 0)
+            {
+                printf("mask ok\n");
+            }
+        }
+
+        lLaMa.set_cache_inputs(k_caches, v_caches, mask_2, precompute_len, max_kvcache_num);
     }
 
     if (prompt != "")
