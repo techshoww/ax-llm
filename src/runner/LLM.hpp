@@ -336,18 +336,25 @@ public:
             memcpy(data, dst.data, dst.rows * dst.cols * 3);
             vpm_encoder.inference();
             AX_SYS_MinvalidateCache(vpm_encoder.get_output(0).phyAddr, vpm_encoder.get_output(0).pVirAddr, vpm_encoder.get_output(0).nSize);
-            memcpy(vpm_resampler.get_input("input").pVirAddr, vpm_encoder.get_output(0).pVirAddr, vpm_encoder.get_output(0).nSize);
+            memcpy(vpm_resampler.get_input(0).pVirAddr, vpm_encoder.get_output(0).pVirAddr, vpm_encoder.get_output(0).nSize);
         }
         else
         {
-            void *data = vpm_resampler.get_input("input").pVirAddr;
+            void *data = vpm_resampler.get_input(0).pVirAddr;
             memcpy(data, dst.data, dst.rows * dst.cols * 3);
         }
 
         vpm_resampler.inference();
-        out_embed.resize(vpm_resampler.get_output("output").nSize / sizeof(unsigned short));
+        out_embed.resize(vpm_resampler.get_output("output").nSize / sizeof(float));
         AX_SYS_MinvalidateCache(vpm_resampler.get_output("output").phyAddr, vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
-        memcpy(out_embed.data(), vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
+
+        float *output_data = (float *)vpm_resampler.get_output("output").pVirAddr;
+        for (size_t i = 0; i < out_embed.size(); i++)
+        {
+            out_embed[i] = bfloat16(output_data[i]).data;
+        }
+
+        // memcpy(out_embed.data(), vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
         ALOGI("image encode time : %f ms, size : %d", t.cost(), out_embed.size());
         return 0;
     }
@@ -376,8 +383,8 @@ public:
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
-        // constexpr int IMG_CONTEXT = 151648;	// InternVL2
-        constexpr int IMG_CONTEXT = 151667;	// InternVL2.5
+        constexpr int IMG_CONTEXT = 151648;	// InternVL2
+        // constexpr int IMG_CONTEXT = 151667; // InternVL2.5
         int offset = 0;
 
         for (size_t i = 0; i < input_ids.size(); i++)
