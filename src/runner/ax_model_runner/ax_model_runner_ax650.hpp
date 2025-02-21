@@ -11,8 +11,8 @@ protected:
     int sub_init();
 
 public:
-    int init(const char *model_file, bool use_mmap = false) override;
-    int init(char *model_buffer, size_t model_size) override;
+    int init(const char *model_file, int devid, bool use_mmap = false) override;
+    int init(char *model_buffer, size_t model_size, int devid) override;
 
     void release();
     void deinit() override;

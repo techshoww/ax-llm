@@ -46,11 +46,15 @@ protected:
     std::map<std::string, ax_runner_tensor_t> map_output_tensors;
     std::map<std::string, ax_runner_tensor_t> map_input_tensors;
 
+    int _devid = 0;
+
 public:
-    virtual int init(const char *model_file, bool use_mmap = false) = 0;
-    virtual int init(char *model_buffer, size_t model_size) = 0;
+    virtual int init(const char *model_file, int devid, bool use_mmap = false) = 0;
+    virtual int init(char *model_buffer, size_t model_size, int devid) = 0;
 
     virtual void deinit() = 0;
+
+    int get_devid() { return _devid; }
 
     int get_num_inputs() { return minput_tensors.size(); }
     int get_num_outputs() { return moutput_tensors.size(); };

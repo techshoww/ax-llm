@@ -4,6 +4,8 @@
 
 #include "cmdline.hpp"
 
+#include <axcl.h>
+
 static LLM lLaMa;
 
 void __sigExit(int iSigNo)
@@ -68,7 +70,6 @@ int main(int argc, char *argv[])
     cmd.add<int>("tokens_embed_size", 0, "tokens embed size", false, attr.tokens_embed_size);
 
     cmd.add<bool>("use_mmap_load_embed", 0, "it can save os memory", false, attr.b_use_mmap_load_embed);
-    cmd.add<bool>("dynamic_load_axmodel_layer", 0, "it can save cmm memory", false, attr.b_dynamic_load_axmodel_layer);
 
     cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
 
@@ -89,7 +90,6 @@ int main(int argc, char *argv[])
     attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
 
     attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
-    attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
 
     bool b_live_print = cmd.get<bool>("live_print");
     if (b_live_print)
@@ -99,6 +99,31 @@ int main(int argc, char *argv[])
     }
 
     b_continue = cmd.get<bool>("continue");
+
+    auto ret = axclInit(nullptr);
+    if (0 != ret)
+    {
+        return ret;
+    }
+
+    // axclrtDeviceList lst;
+    // if (const auto ret = axclrtGetDeviceList(&lst); 0 != ret || 0 == lst.num)
+    // {
+    //     ALOGE("Get AXCL device failed{0x%8x}, find total %d device.\n", ret, lst.num);
+    //     return -1;
+    // }
+    // if (const auto ret = axclrtSetDevice(lst.devices[0]); 0 != ret)
+    // {
+    //     ALOGE("Set AXCL device failed{0x%8x}.\n", ret);
+    //     return -1;
+    // }
+
+    // ret = axclrtEngineInit(AXCL_VNPU_DISABLE);
+    // if (0 != ret)
+    // {
+    //     ALOGE("axclrtEngineInit %d\n", ret);
+    //     return ret;
+    // }
 
     if (!lLaMa.Init(attr))
     {
@@ -139,6 +164,8 @@ int main(int argc, char *argv[])
     }
 
     lLaMa.Deinit();
+
+    axclFinalize();
 
     return 0;
 }
