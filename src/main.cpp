@@ -71,6 +71,8 @@ int main(int argc, char *argv[])
 
     cmd.add<bool>("use_mmap_load_embed", 0, "it can save os memory", false, attr.b_use_mmap_load_embed);
 
+    cmd.add<std::string>("devices", 0, "devices id,for example: \"0,1,2,3\" ", true, "0,1,2,3");
+
     cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
 
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
@@ -90,6 +92,17 @@ int main(int argc, char *argv[])
     attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
 
     attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
+
+    auto devices_str = cmd.get<std::string>("devices");
+    std::vector<int> devices;
+    std::stringstream ss(devices_str);
+    std::string item;
+    while (std::getline(ss, item, ','))
+    {
+        devices.push_back(std::stoi(item));
+    }
+
+    attr.dev_ids = devices;
 
     bool b_live_print = cmd.get<bool>("live_print");
     if (b_live_print)
@@ -127,6 +140,8 @@ int main(int argc, char *argv[])
 
     if (!lLaMa.Init(attr))
     {
+        ALOGE("lLaMa.Init failed");
+        axclFinalize();
         return -1;
     }
     if (prompt != "")

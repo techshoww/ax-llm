@@ -13,13 +13,26 @@ static bool axcl_contains(int devid)
 
 axclError axcl_Init(int devid)
 {
+    if (axcl_contains(devid))
+    {
+        ALOGI("AXCL device %d already inited\n", devid);
+        return 0;
+    }
     g_devices[devid] = std::make_shared<AXCLWorker>();
-    g_devices[devid]->Run(devid);
+    if (!g_devices[devid]->Run(devid))
+    {
+        return -1;
+    }
     return 0;
 }
 
 axclError axcl_Exit(int devid)
 {
+    if (!axcl_contains(devid))
+    {
+        ALOGE("AXCL device %d not inited\n", devid);
+        return -1;
+    }
     g_devices[devid]->Stop();
     g_devices.erase(devid);
     return 0;
@@ -112,7 +125,6 @@ axclError axcl_Memcmp(const void *devPtr1, const void *devPtr2, size_t count, in
     return g_devices[devid]->axclMemcmp(devPtr1, devPtr2, count);
 }
 
-
 axclError axcl_EngineLoadFromFile(const char *modelPath, uint64_t *modelId, int devid)
 {
     if (!axcl_contains(devid))
@@ -137,7 +149,7 @@ axclError axcl_EngineUnload(uint64_t modelId, int devid)
     }
     return g_devices[devid]->axclEngineUnload(modelId);
 }
-const char* axcl_EngineGetModelCompilerVersion(uint64_t modelId, int devid)
+const char *axcl_EngineGetModelCompilerVersion(uint64_t modelId, int devid)
 {
     if (!axcl_contains(devid))
     {
@@ -265,7 +277,7 @@ uint64_t axcl_EngineGetOutputSizeByIndex(axclrtEngineIOInfo ioInfo, uint32_t gro
     }
     return g_devices[devid]->axclEngineGetOutputSizeByIndex(ioInfo, group, index);
 }
-const char* axcl_EngineGetInputNameByIndex(axclrtEngineIOInfo ioInfo, uint32_t index, int devid)
+const char *axcl_EngineGetInputNameByIndex(axclrtEngineIOInfo ioInfo, uint32_t index, int devid)
 {
     if (!axcl_contains(devid))
     {
@@ -273,7 +285,7 @@ const char* axcl_EngineGetInputNameByIndex(axclrtEngineIOInfo ioInfo, uint32_t i
     }
     return g_devices[devid]->axclEngineGetInputNameByIndex(ioInfo, index);
 }
-const char* axcl_EngineGetOutputNameByIndex(axclrtEngineIOInfo ioInfo, uint32_t index, int devid)
+const char *axcl_EngineGetOutputNameByIndex(axclrtEngineIOInfo ioInfo, uint32_t index, int devid)
 {
     if (!axcl_contains(devid))
     {

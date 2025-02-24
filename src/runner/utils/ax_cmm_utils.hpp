@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <iostream>
 
-// #include "sample_log.h"
+#include "sample_log.h"
 
 static std::string exec_cmd(std::string cmd)
 {
@@ -46,7 +46,7 @@ static int get_remaining_cmm_size()
 
 static bool get_pcie_ids(std::vector<int> &ids)
 {
-    const char *command = "lspci | grep Axera | awk -F':' '{print $2+0}'";
+    const char *command = "lspci | grep Axera | awk -F':' '{print $2}'";
     FILE *pipe = popen(command, "r");
     if (!pipe)
     {
@@ -56,7 +56,12 @@ static bool get_pcie_ids(std::vector<int> &ids)
     char buffer[128];
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
     {
-        ids.push_back(std::stoi(buffer));
+        try {
+            // 使用基数16解析字符串
+            ids.push_back(std::stoi(buffer, nullptr, 16));
+        } catch (const std::exception &e) {
+            std::cerr << "Error parsing PCI id: " << e.what() << std::endl;
+        }
     }
     pclose(pipe);
     return true;

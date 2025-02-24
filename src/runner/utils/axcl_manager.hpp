@@ -10,6 +10,7 @@
 #include <chrono>
 
 #include <axcl.h>
+#include "ax_cmm_utils.hpp"
 #include "sample_log.h"
 
 class AXCLWorker
@@ -22,38 +23,83 @@ private:
     std::condition_variable condition;
     std::atomic<bool> stop_flag;
 
-    // 工作线程循环，从队列中取任务执行
+    std::promise<bool> initPromise;
+
     void run(int devid)
     {
-        ALOGI("AXCLWorker start with devid %d");
+        ALOGI("AXCLWorker start with devid %d", devid);
+        std::vector<int> ids;
+        if (!get_pcie_ids(ids))
+        {
+            ALOGE("get_pcie_ids failed");
+            initPromise.set_value(false); // 初始化失败
+            return;
+        }
+
         axclrtDeviceList lst;
         if (const auto ret = axclrtGetDeviceList(&lst); 0 != ret || 0 == lst.num)
         {
-            ALOGE("Get AXCL device failed{0x%8x}, find total %d device.\n", ret, lst.num);
+            ALOGE("Get AXCL device failed{0x%8x}, find total %d device.", ret, lst.num);
+            initPromise.set_value(false); // 初始化失败
             return;
         }
         if (devid >= lst.num)
         {
-            ALOGE("Invalid AXCL device id %d, find total %d device.\n", devid, lst.num);
+            ALOGE("Invalid AXCL device id %d, find total %d device.", devid, lst.num);
+            initPromise.set_value(false); // 初始化失败
             return;
         }
-        if (const auto ret = axclrtSetDevice(lst.devices[devid]); 0 != ret)
+
+        int devidx = -1;
+
+        for (size_t j = 0; j < lst.num; j++)
         {
-            ALOGE("Set AXCL device failed{0x%8x}.\n", ret);
+            if (ids[devid] == lst.devices[j])
+            {
+                devidx = j;
+                break;
+            }
+        }
+
+        if (devidx == -1)
+        {
+            for (int j = 0; j < lst.num; j++)
+            {
+                printf("device[%d]: %d\n", j, lst.devices[j]);
+            }
+            for (int i = 0; i < ids.size(); i++)
+            {
+                printf("pcie[%d]: %d\n", i, ids[i]);
+            }
+
+            ALOGE("Invalid AXCL device id %d, find total %d device.", devid, lst.num);
+            initPromise.set_value(false); // 初始化失败
+            return;
+        }
+
+        // ALOGI("AXCLWorker start with devidx-%d, bus-id-%d", devidx, lst.devices[devidx]);
+
+        if (const auto ret = axclrtSetDevice(lst.devices[devidx]); 0 != ret)
+        {
+            ALOGE("Set AXCL device failed{0x%8x}.", ret);
+            initPromise.set_value(false); // 初始化失败
             return;
         }
         if (const auto ret = axclrtEngineInit(AXCL_VNPU_DISABLE); 0 != ret)
         {
-            ALOGE("axclrtEngineInit %d\n", ret);
+            ALOGE("axclrtEngineInit %d", ret);
+            initPromise.set_value(false); // 初始化失败
             return;
         }
+
+        // 初始化成功，通知 Run 可以返回 true
+        initPromise.set_value(true);
 
         while (true)
         {
             Task task;
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
-                // 等待直到有任务或收到停止信号
                 condition.wait(lock, [this]
                                { return stop_flag || !tasks.empty(); });
                 if (stop_flag && tasks.empty())
@@ -63,10 +109,9 @@ private:
                 task = std::move(tasks.front());
                 tasks.pop();
             }
-            // 在该线程中执行任务
             task();
         }
-        ALOGI("AXCLWorker exit with devid %d\n");
+        ALOGI("AXCLWorker exit with devid %d", devid);
     }
 
     // 添加任务的接口（无返回值版本）
@@ -342,12 +387,26 @@ public:
         Stop();
     }
 
-    int Run(int devid)
+    bool Run(int devid)
     {
-        worker_thread = std::thread(&AXCLWorker::run, this, devid);
-        return 0;
-    }
+        // 启动线程前先重置 promise，确保没有旧状态影响
+        initPromise = std::promise<bool>();
+        std::future<bool> initFuture = initPromise.get_future();
 
+        worker_thread = std::thread(&AXCLWorker::run, this, devid);
+
+        // 等待一定时间，防止无限等待（可根据需要设置超时时间）
+        if (initFuture.wait_for(std::chrono::seconds(5)) == std::future_status::ready)
+        {
+            bool initSuccess = initFuture.get();
+            return initSuccess;
+        }
+        else
+        {
+            ALOGE("AXCLWorker initialization timeout");
+            return false;
+        }
+    }
     // 停止工作线程
     void Stop()
     {
@@ -412,7 +471,7 @@ public:
         auto future_result = addTaskWithResult(&AXCLWorker::axclrtMemcmp_func, this, devPtr1, devPtr2, count);
         return future_result.get();
     }
-    
+
     // ────────── 以下为对外的 API 封装，顺序按照需求排列 ──────────
     axclError axclEngineLoadFromFile(const char *modelPath, uint64_t *modelId)
     {
