@@ -119,25 +119,6 @@ int main(int argc, char *argv[])
         return ret;
     }
 
-    // axclrtDeviceList lst;
-    // if (const auto ret = axclrtGetDeviceList(&lst); 0 != ret || 0 == lst.num)
-    // {
-    //     ALOGE("Get AXCL device failed{0x%8x}, find total %d device.\n", ret, lst.num);
-    //     return -1;
-    // }
-    // if (const auto ret = axclrtSetDevice(lst.devices[0]); 0 != ret)
-    // {
-    //     ALOGE("Set AXCL device failed{0x%8x}.\n", ret);
-    //     return -1;
-    // }
-
-    // ret = axclrtEngineInit(AXCL_VNPU_DISABLE);
-    // if (0 != ret)
-    // {
-    //     ALOGE("axclrtEngineInit %d\n", ret);
-    //     return ret;
-    // }
-
     if (!lLaMa.Init(attr))
     {
         ALOGE("lLaMa.Init failed");
