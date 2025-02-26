@@ -28,13 +28,6 @@ private:
     void run(int devid)
     {
         ALOGI("AXCLWorker start with devid %d", devid);
-        std::vector<int> ids;
-        if (!get_pcie_ids(ids))
-        {
-            ALOGE("get_pcie_ids failed");
-            initPromise.set_value(false); // 初始化失败
-            return;
-        }
 
         axclrtDeviceList lst;
         if (const auto ret = axclrtGetDeviceList(&lst); 0 != ret || 0 == lst.num)
@@ -50,36 +43,9 @@ private:
             return;
         }
 
-        int devidx = -1;
-
-        for (size_t j = 0; j < lst.num; j++)
-        {
-            if (ids[devid] == lst.devices[j])
-            {
-                devidx = j;
-                break;
-            }
-        }
-
-        if (devidx == -1)
-        {
-            for (int j = 0; j < lst.num; j++)
-            {
-                printf("device[%d]: %d\n", j, lst.devices[j]);
-            }
-            for (int i = 0; i < ids.size(); i++)
-            {
-                printf("pcie[%d]: %d\n", i, ids[i]);
-            }
-
-            ALOGE("Invalid AXCL device id %d, find total %d device.", devid, lst.num);
-            initPromise.set_value(false); // 初始化失败
-            return;
-        }
-
         // ALOGI("AXCLWorker start with devidx-%d, bus-id-%d", devidx, lst.devices[devidx]);
 
-        if (const auto ret = axclrtSetDevice(lst.devices[devidx]); 0 != ret)
+        if (const auto ret = axclrtSetDevice(lst.devices[devid]); 0 != ret)
         {
             ALOGE("Set AXCL device failed{0x%8x}.", ret);
             initPromise.set_value(false); // 初始化失败

@@ -28,7 +28,7 @@ typedef std::pair<AX_ENGINE_ALLOC_BUFFER_STRATEGY_T, AX_ENGINE_ALLOC_BUFFER_STRA
 
 static void print_io_info(std::vector<ax_runner_tensor_t> &input, std::vector<ax_runner_tensor_t> &output)
 {
-    printf("\ninput size: %d\n", input.size());
+    printf("\ninput size: %ld\n", input.size());
     for (uint32_t i = 0; i < input.size(); ++i)
     {
         // print shape info,like [batchsize x channel x height x width]
@@ -56,7 +56,7 @@ static void print_io_info(std::vector<ax_runner_tensor_t> &input, std::vector<ax
         printf("\e[0m\n\n");
     }
 
-    printf("\noutput size: %d\n", output.size());
+    printf("\noutput size: %ld\n", output.size());
     for (uint32_t i = 0; i < output.size(); ++i)
     {
         // print shape info,like [batchsize x channel x height x width]
@@ -144,7 +144,7 @@ static inline int prepare_io(uint64_t handle, uint64_t context, axclrtEngineIOIn
         if (ret != 0)
         {
             free_io_index(io_data->pInputs, i, _devid);
-            fprintf(stderr, "Malloc input(index: %d, size: %d) failed! ret=0x%x\n", i, bufSize, ret);
+            fprintf(stderr, "Malloc input(index: %d, size: %ld) failed! ret=0x%x\n", i, bufSize, ret);
             return -1;
         }
         std::vector<char> tmp(bufSize, 0);
@@ -192,7 +192,7 @@ static inline int prepare_io(uint64_t handle, uint64_t context, axclrtEngineIOIn
         if (ret != 0)
         {
             free_io_index(io_data->pOutputs, i, _devid);
-            fprintf(stderr, "Malloc output(index: %d, size: %d) failed! ret=0x%x\n", i, bufSize, ret);
+            fprintf(stderr, "Malloc output(index: %d, size: %ld) failed! ret=0x%x\n", i, bufSize, ret);
             return -1;
         }
         std::vector<char> tmp(bufSize, 0);

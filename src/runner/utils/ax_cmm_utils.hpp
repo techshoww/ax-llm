@@ -44,45 +44,10 @@ static int get_remaining_cmm_size()
     return -1;
 }
 
-static bool get_pcie_ids(std::vector<int> &ids)
-{
-    const char *command = "lspci | grep Axera | awk -F':' '{print $2}'";
-    FILE *pipe = popen(command, "r");
-    if (!pipe)
-    {
-        std::cerr << "Failed to run command!" << std::endl;
-        return false;
-    }
-    char buffer[128];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
-    {
-        try {
-            // 使用基数16解析字符串
-            ids.push_back(std::stoi(buffer, nullptr, 16));
-        } catch (const std::exception &e) {
-            std::cerr << "Error parsing PCI id: " << e.what() << std::endl;
-        }
-    }
-    pclose(pipe);
-    return true;
-}
-
 static int get_pcie_remaining_cmm_size(int devid)
 {
-    std::vector<int> ids;
-    if (!get_pcie_ids(ids))
-    {
-        ALOGE("get_pcie_ids failed");
-        return -1;
-    }
-    if (ids.size() == 0 || devid >= ids.size())
-    {
-        ALOGE("get_pcie_ids failed");
-        return -1;
-    }
-
     char command[128];
-    sprintf(command, "axcl-smi -d %d sh cat /proc/ax_proc/mem_cmm_info |grep 'total size'", ids[devid]);
+    sprintf(command, "/usr/bin/axcl/axcl-smi -d %d sh cat /proc/ax_proc/mem_cmm_info |grep 'total size'", devid);
     // printf("%s\n", command);
     std::string result = exec_cmd(command);
 
