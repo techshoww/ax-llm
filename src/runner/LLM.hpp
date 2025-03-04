@@ -219,13 +219,14 @@ public:
         {
             v_remain_cmm.push_back(axcl_GetCMMRemain(_attr.dev_ids[i]));
         }
-        printf(MACRO_PURPLE "\n|%6s|%15s|\n", "ID", "remain cmm(MB)");
+        printf(MACRO_PURPLE "________________________\n");
+        printf("|%6s|%15s|\n", "ID", "remain cmm(MB)");
         printf("========================\n");
         for (int i = 0; i < _attr.dev_ids.size(); i++)
         {
             printf("|%6d|%15d|\n", _attr.dev_ids[i], v_remain_cmm[i]);
         }
-        printf("\n" MACRO_END);
+        printf("¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯\n" MACRO_END);
 
         if (!postprocess.load_config(attr.post_config_path))
         {

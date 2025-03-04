@@ -1,0 +1,15 @@
+./main \
+--template_filename_axmodel "Qwen2.5-14B-Instruct-GPTQ-Int4-ax650/qwen2_p128_l%d_together.axmodel" \
+--axmodel_num 48 \
+--tokenizer_type 2 \
+--filename_tokenizer_model "http://127.0.0.1:12345" \
+--bos 0 --eos 0 \
+--filename_post_axmodel Qwen2.5-14B-Instruct-GPTQ-Int4-ax650/qwen2_post.axmodel \
+--filename_tokens_embed Qwen2.5-14B-Instruct-GPTQ-Int4-ax650/model.embed_tokens.weight.bfloat16.bin \
+--tokens_embed_num 152064 \
+--tokens_embed_size 5120 \
+--use_mmap_load_embed 0 \
+--live_print 1 \
+--devices 0,1,2,3,4,5,6 \
+--continue 1 \
+--prompt "$1"
