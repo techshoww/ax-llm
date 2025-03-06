@@ -51,6 +51,15 @@
 
 ![demo.jpg](assets/demo.jpg)
 
+#### 1. 首先启动 HTTP Tokenizer Server  
+```
+cd scripts
+python smolvlm_tokenizer_512.py   # 记得修改代码中的 host
+```
+
+#### 2. 在板子上运行模型  
+1) 先修改 `run_smolvlm.sh` 中的http host.  
+2) 将 `scripts/run_smolvlm.sh` 和 `build/install/bin/main` 拷贝到爱芯板子上  
 ```shell
 root@ax650:SmolVLM-256M-Instruct-Infer# ./run_smolvlm.sh
 [I][                            Init][ 127]: LLM init start
