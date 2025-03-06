@@ -84,6 +84,9 @@ int main(int argc, char *argv[])
     cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
 
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
+    cmd.add<int>("img_width", 'w', "image width", true);
+    cmd.add<int>("img_height", 'h', "image height", true);
+    cmd.add<unsigned int>("img_token_id", 0, "image token id", false, 151667);  // Default value for InternVL2.5
 
     cmd.parse_check(argc, argv);
 
@@ -109,6 +112,9 @@ int main(int argc, char *argv[])
 
     attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
     attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
+    attr.vpm_width = cmd.get<int>("img_width");
+    attr.vpm_height = cmd.get<int>("img_height");
+    unsigned int img_token_id = cmd.get<unsigned int>("img_token_id");
 
     bool b_live_print = cmd.get<bool>("live_print");
     if (b_live_print)
@@ -144,7 +150,7 @@ int main(int argc, char *argv[])
         else
         {
             lLaMa.Encode(src, img_embed);
-            lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type));
+            lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type), img_token_id);
             output = lLaMa.Run(prompt_data);
         }
 

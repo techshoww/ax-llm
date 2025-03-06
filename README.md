@@ -18,16 +18,18 @@
 ### 已支持模型
 
 - InternVL2-1B
+- SmolVLM-256M-Instruct
 
 ### 获取地址
 
-- [百度网盘](https://pan.baidu.com/s/1_LG-sPKnLS_LTWF3Cmcr7A?pwd=ph0e)
+- InternVL2-1B [百度网盘](https://pan.baidu.com/s/1_LG-sPKnLS_LTWF3Cmcr7A?pwd=ph0e)
+- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct.tar.gz) 
 
 ## 源码编译
 
 - 递归 clone 本项目，确保所有 `submodule` 正确 clone
     ```shell
-    git clone -b internvl2 --recursive https://github.com/AXERA-TECH/ax-llm.git
+    git clone -b smolvlm --recursive https://github.com/AXERA-TECH/ax-llm.git
     cd ax-llm
     ```
 - 仔细阅读 `build.sh` ，并在 `build.sh` 正确修改 `BSP_MSP_DIR` 变量后，运行编译脚本
@@ -45,36 +47,42 @@
   
 ## 运行示例
 
-### InternVL2 1B
+### SmolVLM-256M-Instruct
 
-![dog](https://github.com/user-attachments/assets/fa58faaa-48ed-4550-a37c-8d6b39eef9b8)
+![demo.jpg](assets/demo.jpg)
 
 ```shell
-root@ax650:/llm-test/internvl2-1b# ./run_internvl2.sh
+root@ax650:SmolVLM-256M-Instruct-Infer# ./run_smolvlm.sh
 [I][                            Init][ 127]: LLM init start
-bos_id: -1, eos_id: 151645
-  3% | ██                                |   1 /  28 [0.01s<0.14s, 200.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
-100% | ████████████████████████████████ |  28 /  28 [1.43s<1.43s, 19.58 count/s] init vpm axmodel ok,remain_cmm(11116 MB)B)
+bos_id: 1, eos_id: 49279
+  2% | █                                 |   1 /  34 [0.01s<0.34s, 100.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
+100% | ████████████████████████████████ |  34 /  34 [0.81s<0.81s, 42.08 count/s] init vpm axmodel ok,remain_cmm(3474 MB)B)
 [I][                            Init][ 275]: max_token_len : 1023
-[I][                            Init][ 280]: kv_cache_size : 128, kv_cache_num: 1023
-[I][                            Init][ 288]: prefill_token_num : 128
-[I][                            Init][ 290]: vpm_height : 224,vpm_width : 224
+[I][                            Init][ 280]: kv_cache_size : 192, kv_cache_num: 1023
+[I][                            Init][ 288]: prefill_token_num : 320
+[I][                            Init][ 290]: vpm_height : 512,vpm_width : 512
 [I][                            Init][ 299]: LLM init ok
-Type "q" to exit, Ctrl+c to stop current running
-prompt >> 描述下图片
-image >> images/ssd_dog.jpg
-[I][                          Encode][ 351]: image encode time : 397.944000 ms, size : 57344
-[I][                             Run][ 561]: ttft: 124.73 ms
+[I][                          Encode][ 358]: image encode time : 118.375999 ms, size : 36864
+[I][                             Run][ 569]: ttft: 250.73 ms
+ The image depicts a large, historic statue of Liberty, located in New York City. The statue is a prominent landmark and is known for its iconic presence in the city. The statue is located on a pedestal that is surrounded by a large, circular base. The base of the statue is made of stone and is painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
 
-这张图片展示了一只狗坐在阳台上，正在用嘴咬着一辆自行车。阳台的背景是黄色的墙壁，可以看到外面的街道和一辆停着的汽车。阳台的窗户上挂着白色的窗帘，阳光透过窗户照进来，给整个场景增添了一种温暖的氛围。
+The statue is made of bronze and is quite large, measuring approximately 100 feet in height. The statue is mounted on a pedestal that is made of stone and is painted in a light blue color. The pedestal is rectangular and is supported by a series of columns. The columns are made of stone and are painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
 
-[N][                             Run][ 700]: hit eos,avg 31.16 token/s
+In the background, there is a large cityscape with a variety of buildings and structures. The sky is clear and blue, indicating that it is a sunny day. The buildings are tall and have a modern architectural style, with large windows and balconies. The buildings are mostly made of glass and steel, and they are painted in a variety of colors.
+
+There are a few trees and bushes visible in the foreground, which are located on the left side of the image. The trees are green and appear to be healthy. There is also a small, white building visible in the background, which is likely a hotel or a small office.
+
+The overall atmosphere of the image is one of peace and tranquility. The statue is a symbol of freedom and liberty, and the surrounding buildings and structures add to the sense of the city's historical and cultural significance.
+
+In summary, the image depicts the Statue of Liberty, a large, historic statue located in New York City. The statue is a prominent landmark and is surrounded by a large, circular ring that encircles the base. The statue is painted in a light blue color and is mounted on a pedestal that is surrounded by a large, circular ring. The statue is surrounded by a large, circular ring that encircles the base. The background includes a large cityscape with tall buildings and a clear blue sky. The overall atmosphere of the image is one of peace and tranquility.
+
+[N][                             Run][ 708]: hit eos,avg 76.46 token/s
 ```
 
 ## Reference
 
 - [InternVL2-1B](https://huggingface.co/OpenGVLab/InternVL2-1B)
-
+- [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct)
 ## 技术讨论
 
 - Github issues

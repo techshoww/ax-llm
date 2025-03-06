@@ -345,16 +345,16 @@ public:
         }
 
         vpm_resampler.inference();
-        out_embed.resize(vpm_resampler.get_output("output").nSize / sizeof(float));
-        AX_SYS_MinvalidateCache(vpm_resampler.get_output("output").phyAddr, vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
+        out_embed.resize(vpm_resampler.get_output(0).nSize / sizeof(float));
+        AX_SYS_MinvalidateCache(vpm_resampler.get_output(0).phyAddr, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
 
-        float *output_data = (float *)vpm_resampler.get_output("output").pVirAddr;
+        float *output_data = (float *)vpm_resampler.get_output(0).pVirAddr;
         for (size_t i = 0; i < out_embed.size(); i++)
         {
             out_embed[i] = bfloat16(output_data[i]).data;
         }
 
-        // memcpy(out_embed.data(), vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
+        // memcpy(out_embed.data(), vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
         ALOGI("image encode time : %f ms, size : %d", t.cost(), out_embed.size());
         return 0;
     }
@@ -374,22 +374,22 @@ public:
             embed_selector.getByIndex(input_ids[i], out_embed.data() + i * _attr.tokens_embed_size);
         }
 
-        // memcpy(out_embed.data() + 5 * _attr.tokens_embed_size, vpm_resampler.get_output("output").pVirAddr, vpm_resampler.get_output("output").nSize);
+        // memcpy(out_embed.data() + 5 * _attr.tokens_embed_size, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
 
         return 0;
     }
 
-    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::string prompt = "What is in the image?")
+    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::string prompt = "What is in the image?", const unsigned int img_token_id = 49190)
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
-        constexpr int IMG_CONTEXT = 151648;	// InternVL2
-        // constexpr int IMG_CONTEXT = 151667; // InternVL2.5
+        // constexpr int img_token_id = 49190;	// smolvlm
+        // constexpr int img_token_id = 151667; // InternVL2.5
         int offset = 0;
 
         for (size_t i = 0; i < input_ids.size(); i++)
         {
-            if (input_ids[i] == IMG_CONTEXT)
+            if (input_ids[i] == img_token_id)
             {
                 offset = i;
                 break;
