@@ -23,7 +23,7 @@
 ### 获取地址
 
 - InternVL2-1B [百度网盘](https://pan.baidu.com/s/1_LG-sPKnLS_LTWF3Cmcr7A?pwd=ph0e)
-- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct.tar.gz) 
+- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct-AX650.tar.gz) 
 
 ## 源码编译
 
