@@ -16,4 +16,5 @@
 --img_width 512 \
 --img_height 512 \
 --img_token_id 49190 \
+--post_config_path post_config.json \
 --prompt "$1" --image "$2"

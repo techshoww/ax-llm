@@ -87,6 +87,7 @@ int main(int argc, char *argv[])
     cmd.add<int>("img_width", 'w', "image width", true);
     cmd.add<int>("img_height", 'h', "image height", true);
     cmd.add<unsigned int>("img_token_id", 0, "image token id", false, 151667);  // Default value for InternVL2.5
+    cmd.add<std::string>("post_config_path", 0, "post config path", false, attr.post_config_path);
 
     cmd.parse_check(argc, argv);
 
@@ -115,6 +116,7 @@ int main(int argc, char *argv[])
     attr.vpm_width = cmd.get<int>("img_width");
     attr.vpm_height = cmd.get<int>("img_height");
     unsigned int img_token_id = cmd.get<unsigned int>("img_token_id");
+    attr.post_config_path = cmd.get<std::string>("post_config_path");
 
     bool b_live_print = cmd.get<bool>("live_print");
     if (b_live_print)

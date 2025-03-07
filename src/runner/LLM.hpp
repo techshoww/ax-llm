@@ -12,6 +12,7 @@
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
+#include "LLMPostprocess.hpp"
 
 typedef void (*LLMRuningCallback)(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve);
 
@@ -22,7 +23,7 @@ struct LLMAttrType
 
     // std::string template_prefill_filename_axmodel = "minicpmv/prefill_axmodel/minicpm_p96_l%d.axmodel";
     // int prefill_axmodel_num = 40;
-    int prefill_token_num = 96;
+    int prefill_token_num = 96; // auto calc
 
     std::string filename_post_axmodel = "tinyllama-int8/tinyllama_post.axmodel";
 
@@ -50,6 +51,7 @@ struct LLMAttrType
     bool b_use_mmap_load_layer = true;
 
     bool b_use_topk = false;
+    std::string post_config_path = "post_config.json";
 
     // bool b_live_print = true;
     LLMRuningCallback runing_callback = nullptr;
@@ -84,41 +86,18 @@ private:
 
     bool b_stop = false;
 
-    static int FindMax(unsigned short *p, int n, float *val = 0)
+    LLMPostprocess postprocess;
+    static int post_process(LLMPostprocess &postprocess, unsigned short *p, int n, std::vector<int> &history, float *val = 0)
     {
-        float max_val = -MAXFLOAT;
-        int max_index = 0;
+        std::vector<float> logits(n);
         for (int i = 0; i < n; i++)
         {
             unsigned int proc = p[i] << 16;
-            float tmp = *reinterpret_cast<float *>(&proc);
-            if (tmp > max_val)
-            {
-                max_val = tmp;
-                max_index = i;
+            logits[i] = *reinterpret_cast<float *>(&proc);
             }
-        }
 
-        // for (int i = 0; i < n; i += 4)
-        // {
-        //     uint16x4_t bf16_data = vld1_u16(&p[i]);
-        //     uint32x4_t float_data = vmovl_u16(bf16_data);
-        //     float32x4_t tmp_floats = vreinterpretq_f32_u32(vshlq_n_u32(float_data, 16));
+        return postprocess.apply(logits, history);
 
-        //     for (int j = 0; j < 4; j++)
-        //     {
-        //         float tmp = vgetq_lane_f32(tmp_floats, j);
-        //         if (tmp > max_val)
-        //         {
-        //             max_val = tmp;
-        //             max_index = i + j;
-        //         }
-        //     }
-        // }
-
-        if (val)
-            *val = max_val;
-        return max_index;
     }
 
 public:
@@ -560,7 +539,7 @@ public:
                 AX_SYS_MinvalidateCache(output_post.phyAddr, output_post.pVirAddr, output_post.nSize);
                 unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                 float max_val = -MAXFLOAT;
-                max_index = FindMax(post_out, _attr.tokens_embed_num, &max_val);
+                max_index = post_process(postprocess, post_out, _attr.tokens_embed_num, token_ids, &max_val);
             }
             next_token = max_index;
 
@@ -662,7 +641,7 @@ public:
                     AX_SYS_MinvalidateCache(output_post.phyAddr, output_post.pVirAddr, output_post.nSize);
                     unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                     float max_val = -MAXFLOAT;
-                    max_index = FindMax(post_out, _attr.tokens_embed_num, &max_val);
+                    max_index = post_process(postprocess, post_out, _attr.tokens_embed_num, token_ids, &max_val);
                 }
                 next_token = max_index;
 
