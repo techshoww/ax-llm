@@ -80,7 +80,7 @@ class Tokenizer_Http():
     def encode(self, content):
         prompt = f"<|im_start|>User:{content}<end_of_utterance>\nAssistant:"
         input_ids = self.tokenizer(prompt)
-        return input_ids
+        return input_ids["input_ids"]
 
     def encode_vpm(self, content="Can you describe this image?"):
 
@@ -114,7 +114,6 @@ class Tokenizer_Http():
             # Place in the image prompt strings where the image tokens are
             sample = split_sample[0]
             for i, image_prompt_string in enumerate(image_prompt_strings):
-                print(i)
                 sample += image_prompt_string + split_sample[i + 1]
             prompt_strings.append(sample)
 

@@ -16,4 +16,4 @@
 --img_width 512 \
 --img_height 512 \
 --img_token_id 49190 \
---prompt "Can you describe this image?" --image ./Statue-of-Liberty-Island-New-York-Bay.jpg
+--prompt "$1" --image "$2"
