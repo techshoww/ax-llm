@@ -27,7 +27,7 @@
 
 ## 源码编译
 
-- 递归 clone 本项目，确保所有 `submodule` 正确 clone
+-  clone 本项目  
     ```shell
     git clone  https://github.com/AXERA-TECH/ax-llm.git
     cd ax-llm
