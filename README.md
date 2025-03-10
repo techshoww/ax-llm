@@ -23,7 +23,7 @@
 ### 获取地址
 
 - InternVL2-1B [百度网盘](https://pan.baidu.com/s/1_LG-sPKnLS_LTWF3Cmcr7A?pwd=ph0e)
-- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct-AX650.tar.gz) 
+- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct-AX650.tar.gz) 。推荐这里面的模型[AXERA huggingface](https://huggingface.co/AXERA-TECH/SmolVLM-256M-Instruct)，这里面的模型编译的prefill_len更小，跑的更快。
 
 ## 源码编译
 
@@ -54,26 +54,29 @@
 #### 1. 首先启动 HTTP Tokenizer Server  
 ```
 cd scripts
-python smolvlm_tokenizer_512.py   # 记得修改代码中的 host
+python smolvlm_tokenizer_512.py  --host {your host} --port {your port}   # 和 run_smolvlm.sh 中一致
 ```
 
 #### 2. 在板子上运行模型  
 1) 先修改 `run_smolvlm.sh` 中的http host.  
-2) 将 `scripts/run_smolvlm.sh` 和 `build/install/bin/main` 拷贝到爱芯板子上  
+2) 将 `scripts/run_smolvlm.sh`, `src/post_config.json` ,`build/install/bin/main`, `assets/demo.jpg` 拷贝到爱芯板子上  
 3) 运行 `run_smolvlm.sh`  
 ```shell
-root@ax650:SmolVLM-256M-Instruct-Infer# ./run_smolvlm.sh
-[I][                            Init][ 127]: LLM init start
+root@ax650 ~/SmolVLM-256M-Instruct-Infer # bash run_smolvlm.sh 
+[I][                            Init][ 106]: LLM init start
 bos_id: 1, eos_id: 49279
-  2% | █                                 |   1 /  34 [0.01s<0.34s, 100.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
-100% | ████████████████████████████████ |  34 /  34 [0.81s<0.81s, 42.08 count/s] init vpm axmodel ok,remain_cmm(3474 MB)B)
-[I][                            Init][ 275]: max_token_len : 1023
-[I][                            Init][ 280]: kv_cache_size : 192, kv_cache_num: 1023
-[I][                            Init][ 288]: prefill_token_num : 320
-[I][                            Init][ 290]: vpm_height : 512,vpm_width : 512
-[I][                            Init][ 299]: LLM init ok
-[I][                          Encode][ 358]: image encode time : 118.375999 ms, size : 36864
-[I][                             Run][ 569]: ttft: 250.73 ms
+  2% | █                                 |   1 /  34 [0.01s<0.27s, 125.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
+100% | ████████████████████████████████ |  34 /  34 [1.59s<1.59s, 21.40 count/s] init vpm axmodel ok,remain_cmm(3498 MB)B)
+[I][                            Init][ 254]: max_token_len : 1023
+[I][                            Init][ 259]: kv_cache_size : 192, kv_cache_num: 1023
+[I][                            Init][ 267]: prefill_token_num : 128
+[I][                            Init][ 269]: vpm_height : 512,vpm_width : 512
+[I][                            Init][ 278]: LLM init ok
+Type "q" to exit, Ctrl+c to stop current running
+prompt >> Can you describe this image?
+image >> assets/demo.jpg
+[I][                          Encode][ 337]: image encode time : 119.578003 ms, size : 36864
+[I][                             Run][ 548]: ttft: 57.75 ms
  The image depicts a large, historic statue of Liberty, located in New York City. The statue is a prominent landmark and is known for its iconic presence in the city. The statue is located on a pedestal that is surrounded by a large, circular base. The base of the statue is made of stone and is painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
 
 The statue is made of bronze and is quite large, measuring approximately 100 feet in height. The statue is mounted on a pedestal that is made of stone and is painted in a light blue color. The pedestal is rectangular and is supported by a series of columns. The columns are made of stone and are painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
@@ -86,8 +89,15 @@ The overall atmosphere of the image is one of peace and tranquility. The statue 
 
 In summary, the image depicts the Statue of Liberty, a large, historic statue located in New York City. The statue is a prominent landmark and is surrounded by a large, circular ring that encircles the base. The statue is painted in a light blue color and is mounted on a pedestal that is surrounded by a large, circular ring. The statue is surrounded by a large, circular ring that encircles the base. The background includes a large cityscape with tall buildings and a clear blue sky. The overall atmosphere of the image is one of peace and tranquility.
 
-[N][                             Run][ 708]: hit eos,avg 76.46 token/s
+[N][                             Run][ 687]: hit eos,avg 76.88 token/s
 ```
+
+## 推理速度  
+| Stage | Time |
+|------|------|
+| Image Encoder (512x512) | 120 ms  | 
+| Prefill |  57ms    |
+| Decode  |  77 token/s |
 
 ## Reference
 
