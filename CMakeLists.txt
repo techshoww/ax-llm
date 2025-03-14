@@ -67,6 +67,9 @@ function(build_exec name main_source)
                     src/runner/utils/memory_utils.cpp 
                     src/runner/utils/cqdm.cpp
                     src/runner/Tokenizer/Tokenizer.cpp
+                    src/runner/utils/files.cpp 
+                    src/runner/utils/image_processor.cpp 
+                    src/runner/utils/mrope.cpp
                     )
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)

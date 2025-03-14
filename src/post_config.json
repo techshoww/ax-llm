@@ -1,6 +1,6 @@
 {
     "enable_temperature" : true,
-    "temperature" : 0.9,
+    "temperature" : 0.1,
     
     "enable_repetition_penalty" : false,
     "repetition_penalty" : 2,
