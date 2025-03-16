@@ -79,7 +79,12 @@ int Qwen2VideoProcessor( std::vector<cv::Mat>& src, std::vector<std::vector<unsi
     
     for(auto& img: src){
         cv::Mat img_rs;
-        cv::resize(img, img_rs, size);
+        if(img.cols!=tgt_w || img.rows!=tgt_h){
+            cv::resize(img, img_rs, size, 0, 0, cv::INTER_CUBIC);
+        }else{
+            img_rs = img;
+        }
+        
         cv::cvtColor(img_rs, img_rs, cv::COLOR_BGR2RGB);
         imgs_resized.push_back(img_rs);
     }
@@ -148,38 +153,6 @@ int Qwen2VideoProcessor( std::vector<cv::Mat>& src, std::vector<std::vector<unsi
         }
         output.push_back(out_t);
     }
-
-    // for(size_t d0=0; d0<grid_t; d0++){
-    //     std::vector<unsigned char> out_t;
-    //     for(size_t d3=0; d3<grid_h/merge_size; d3++){
-    //         for(size_t d6=0; d6<grid_w/merge_size; d6++){
-    //             for(size_t d4=0; d4< merge_size; d4++){
-    //                 for(size_t d7=0; d7<merge_size; d7++){
-    //                     for(size_t d1=0; d1<temporal_patch_size; d1++){
-    //                         for(size_t d5=0; d5<patch_size; d5++){
-    //                             for(size_t d8=0; d8<patch_size; d8++){
-    //                                 for(size_t d2=0; d2<channel; d2++){
-    //                                     size_t idx = d0*temporal_patch_size*channel*grid_h*patch_size*grid_w*patch_size;
-    //                                     idx += d1*channel*grid_h*patch_size*grid_w*patch_size;
-    //                                     idx += d2*grid_h*patch_size*grid_w*patch_size;
-    //                                     idx += d3*merge_size*patch_size*grid_w*patch_size;
-    //                                     idx += d4*patch_size*grid_w*patch_size;
-    //                                     idx += d5*grid_w*patch_size;
-    //                                     idx += d6*merge_size*patch_size;
-    //                                     idx += d7*patch_size;
-    //                                     idx += d8;
-
-    //                                     out_t.push_back(patches[idx]);
-    //                                 }
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     output.push_back(out_t);
-    // }
 
     // std::vector<size_t> ret={grid_t, grid_h*grid_w, temporal_patch_size*patch_size*patch_size, channel};
     // return ret;

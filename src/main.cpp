@@ -6,6 +6,12 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "runner/utils/image_processor.hpp"
+
+#include "runner/utils/files.hpp"
+
+#include "runner/utils/mrope.hpp"
+
 static LLM lLaMa;
 
 void __sigExit(int iSigNo)
@@ -134,6 +140,7 @@ int main(int argc, char *argv[])
 
     std::vector<unsigned short> prompt_data;
     std::vector<unsigned short> img_embed;
+     std::vector<std::vector<int>> position_ids;
     //     std::vector<unsigned short> _tmp_data;
     //     lLaMa.RunVpm(src, _tmp_data);
     //     // printf("%d \n", _tmp_data.size());
@@ -143,7 +150,7 @@ int main(int argc, char *argv[])
     if (prompt != "")
     {
         std::string output;
-        cv::Mat src = cv::imread(image_prompt, cv::IMREAD_COLOR);
+        auto src =  ReadImages(image_prompt);
         if (src.empty())
         {
             // output = lLaMa.Run(prompt);
@@ -152,8 +159,8 @@ int main(int argc, char *argv[])
         else
         {
             lLaMa.Encode(src, img_embed);
-            lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type), img_token_id);
-            output = lLaMa.Run(prompt_data);
+            lLaMa.Encode(img_embed, prompt_data, position_ids, prompt_complete(prompt, attr.tokenizer_type), img_token_id);
+            output = lLaMa.Run(prompt_data, position_ids);
         }
 
         if (!b_live_print && !output.empty())
@@ -187,25 +194,25 @@ int main(int argc, char *argv[])
         std::string output;
         if (image_prompt == "")
         {
-            lLaMa.Encode(prompt_data, prompt_complete(prompt, attr.tokenizer_type));
-            output = lLaMa.Run(prompt_data);
+            lLaMa.Encode(prompt_data, position_ids, prompt_complete(prompt, attr.tokenizer_type));
+            output = lLaMa.Run(prompt_data, position_ids);
         }
         else
         {
-            cv::Mat src = cv::imread(image_prompt, cv::IMREAD_COLOR);
+            auto src = ReadImages(image_prompt);
             if (src.empty())
             {
                 // output = lLaMa.Run(prompt);
                 ALOGE("image prompt(%s) not found", image_prompt.c_str());
                 // continue;
-                lLaMa.Encode(prompt_data, prompt_complete(prompt, attr.tokenizer_type));
-                output = lLaMa.Run(prompt_data);
+                lLaMa.Encode(prompt_data, position_ids, prompt_complete(prompt, attr.tokenizer_type));
+                output = lLaMa.Run(prompt_data, position_ids);
             }
             else
             {
                 lLaMa.Encode(src, img_embed);
-                lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type));
-                output = lLaMa.Run(prompt_data);
+                lLaMa.Encode(img_embed, prompt_data, position_ids, prompt_complete(prompt, attr.tokenizer_type), img_token_id);
+                output = lLaMa.Run(prompt_data, position_ids);
             }
         }
 

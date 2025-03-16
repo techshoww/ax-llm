@@ -13,8 +13,31 @@
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
 #include "LLMPostprocess.hpp"
+#include "image_processor.hpp"
+#include "mrope.hpp"
 
 typedef void (*LLMRuningCallback)(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve);
+
+static int FindMax(unsigned short *p, int n, float *val = 0)
+    {
+        float max_val = -MAXFLOAT;
+        int max_index = 0;
+        for (int i = 0; i < n; i++)
+        {
+            unsigned int proc = p[i] << 16;
+            float tmp = *reinterpret_cast<float *>(&proc);
+            if (tmp > max_val)
+            {
+                max_val = tmp;
+                max_index = i;
+            }
+        }
+
+        if (val)
+            *val = max_val;
+        return max_index;
+    }
+
 
 struct LLMAttrType
 {
@@ -338,7 +361,74 @@ public:
         return 0;
     }
 
-    int Encode(std::vector<unsigned short> &out_embed, std::string prompt = "What is in the image?")
+    int Encode(std::vector<cv::Mat> src, std::vector<unsigned short> &out_embed)
+    {
+        int temporal_patch_size=2;
+        int merge_size=2;
+        int patch_size=14;
+        int ret;
+        timer t;
+        t.start();
+
+        if(src.size()==1){
+            return Encode(src[0], out_embed);
+        }
+
+        std::vector<std::vector<unsigned char>> pixel_values;
+
+        int w=308, h=308;
+        Qwen2VideoProcessor(  src, pixel_values,
+                        h, w,
+                        temporal_patch_size, merge_size, patch_size);
+
+        int grid_h =  h/patch_size;
+        int grid_w = w/patch_size;
+        int channel = src[0].channels();
+        int hwc = grid_h * grid_w * temporal_patch_size * patch_size * patch_size * channel;
+
+        int cnt = 0;
+        for(auto &pixel : pixel_values){
+
+            void *data = vpm_resampler.get_input(0).pVirAddr;
+            memcpy(data, pixel.data(), hwc);
+            vpm_resampler.inference();
+
+            size_t size = vpm_resampler.get_output(0).nSize / sizeof(float);
+            if(out_embed.empty()){
+                out_embed.resize( size * pixel_values.size() );
+            }
+            
+            AX_SYS_MinvalidateCache(vpm_resampler.get_output(0).phyAddr, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
+
+            float *output_data = (float *)vpm_resampler.get_output(0).pVirAddr;
+            for (size_t i = 0; i < size; i++)
+            {
+                out_embed[cnt++] = bfloat16(output_data[i]).data;
+            }
+
+        }
+
+        ALOGI("image encode time : %f ms, size : %d", t.cost(), out_embed.size());
+        return 0;
+    }
+
+
+    int GetPositionIds(std::vector<int> &input_ids, std::vector<std::vector<int>> &position_ids, std::vector<std::vector<int>>& image_grid_thw, std::vector<std::vector<int>> &video_grid_thw )
+    {
+        Config config;
+        config.vision_config.spatial_merge_size = 2;
+        config.image_token_id = 151655;
+        config.video_token_id = 151656;
+        config.vision_start_token_id = 151652;
+        config.vision_config.tokens_per_second = 2;
+
+        std::vector<double> second_per_grid_ts = {2};
+
+        position_ids = get_rope_index(config, input_ids, image_grid_thw, video_grid_thw, second_per_grid_ts);
+        return 0;
+    }
+
+    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, std::string prompt = "What is in the image?")
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, false);
         if (input_ids.size() > _attr.prefill_token_num)
@@ -354,18 +444,19 @@ public:
         }
 
         // memcpy(out_embed.data() + 5 * _attr.tokens_embed_size, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
-
+        std::vector<std::vector<int>> image_grid_thw;
+        std::vector<std::vector<int>> video_grid_thw;
+        GetPositionIds(input_ids, position_ids, image_grid_thw, video_grid_thw);
         return 0;
     }
 
-    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::string prompt = "What is in the image?", const unsigned int img_token_id = 49190)
+    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, std::string prompt = "What is in the image?", const unsigned int img_token_id = -1)
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
         // constexpr int img_token_id = 49190;	// smolvlm
         // constexpr int img_token_id = 151667; // InternVL2.5
-        int offset = 0;
-
+        int offset = -1;
         for (size_t i = 0; i < input_ids.size(); i++)
         {
             if (input_ids[i] == img_token_id)
@@ -374,12 +465,6 @@ public:
                 break;
             }
         }
-
-        // for (size_t i = 0; i < input_ids.size(); i++)
-        // {
-        //     printf("%d ", input_ids[i]);
-        // }
-        // printf("\n");
 
         if (input_ids.size() > _attr.prefill_token_num)
         {
@@ -394,17 +479,22 @@ public:
         }
         memcpy(out_embed.data() + offset * _attr.tokens_embed_size, img_embed.data(), img_embed.size() * sizeof(unsigned short));
 
+
+        std::vector<std::vector<int>> image_grid_thw;
+        std::vector<std::vector<int>> video_grid_thw = {{4, 22, 22}};       // just support image size 308x308 , 22*14=308
+        GetPositionIds(input_ids, position_ids, image_grid_thw, video_grid_thw);
+
         return 0;
     }
 
-    std::string Run(std::string input_str)
+    std::string Run(std::string input_str, std::vector<std::vector<int>> &position_ids)
     {
         std::vector<unsigned short> test_embed;
-        Encode(test_embed, input_str);
-        return Run(test_embed);
+        Encode(test_embed, position_ids, input_str);
+        return Run(test_embed, position_ids);
     }
 
-    std::string Run(std::vector<unsigned short> test_embed)
+    std::string Run(std::vector<unsigned short> test_embed,  std::vector<std::vector<int>> &position_ids)
     {
         b_stop = false;
         std::string final_out;
@@ -423,10 +513,7 @@ public:
 
         std::vector<int> cached_token;
         std::vector<int> token_ids;
-        // std::vector<int> token_ids = tokenizer->Encode(input_str);
-        // int len_of_input = token_ids.size();
         int input_embed_num = test_embed.size() / _attr.tokens_embed_size;
-        // ALOGI("input_embed_num(%d)", input_embed_num);
 
         mask[_attr.kv_cache_num] = 0;
         for (size_t i = 0; i < input_embed_num; i++)
@@ -437,6 +524,7 @@ public:
         timer ttft_timer;
         ttft_timer.start();
 
+        int max_pos_id=0;
         for (unsigned int m = 0; m < _attr.axmodel_num; m++)
         {
             if (b_stop)
@@ -466,9 +554,15 @@ public:
 
             auto &input_indices = layer.layer.get_input(prefill_grpid, "indices");
             unsigned int *input_indices_ptr = (unsigned int *)input_indices.pVirAddr;
-            for (unsigned int i = 0; i < input_embed_num; i++)
-            {
-                input_indices_ptr[i] = i;
+
+            for(unsigned int i=0; i< position_ids.size(); i++){
+                for(unsigned int j=0; j<position_ids[i].size(); j++){
+                    input_indices_ptr[ i*position_ids[0].size() + j ] = position_ids[i][j];
+
+                    if(position_ids[i][j]>max_pos_id){
+                        max_pos_id = position_ids[i][j];
+                    }
+                }
             }
 
             auto &input_mask = layer.layer.get_input(prefill_grpid, "mask");
@@ -503,16 +597,6 @@ public:
             // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
         }
 
-        // ALOGI("prefill time cost: %.2f s", t_cost.cost() / 1000);
-
-        // print token_ids
-        // printf("%s\n", input_str.c_str());
-        // for (size_t i = 0; i < token_ids.size(); i++)
-        // {
-        //     printf("%d ", token_ids[i]);
-        // }
-        // printf("\n");
-
         int next_token = -1;
         t_cqdm cqdm = create_cqdm(_attr.max_token_len, 32);
         std::vector<unsigned short> embed(_attr.tokens_embed_size, 0);
@@ -540,6 +624,7 @@ public:
                 unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                 float max_val = -MAXFLOAT;
                 max_index = post_process(postprocess, post_out, _attr.tokens_embed_num, token_ids, &max_val);
+                // max_index = FindMax(post_out, _attr.tokens_embed_num, &max_val);
             }
             next_token = max_index;
 
@@ -550,7 +635,8 @@ public:
         t_cost.start();
 
         bool b_hit_eos = false;
-        for (unsigned int indices = input_embed_num; indices < _attr.max_token_len; indices++)
+
+        for (unsigned int indices = max_pos_id+1; indices < _attr.max_token_len; indices++)
         {
             if (b_stop)
             {
@@ -642,6 +728,7 @@ public:
                     unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                     float max_val = -MAXFLOAT;
                     max_index = post_process(postprocess, post_out, _attr.tokens_embed_num, token_ids, &max_val);
+                    // max_index = FindMax(post_out, _attr.tokens_embed_num, &max_val);
                 }
                 next_token = max_index;
 
