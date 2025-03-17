@@ -324,12 +324,12 @@ public:
         b_stop = true;
     }
 
-    int Encode(cv::Mat src, std::vector<unsigned short> &out_embed)
+    int Encode(cv::Mat& src, std::vector<unsigned short> &out_embed, int height, int width)
     {
         timer t;
         t.start();
         cv::Mat dst;
-        cv::resize(src, dst, cv::Size(_attr.vpm_width, _attr.vpm_height));
+        cv::resize(src, dst, cv::Size(width, height));
         cv::cvtColor(dst, dst, cv::COLOR_BGR2RGB);
 
         if (_attr.b_vpm_two_stage)
@@ -361,30 +361,34 @@ public:
         return 0;
     }
 
-    int Encode(std::vector<cv::Mat> src, std::vector<unsigned short> &out_embed)
+    int Encode(std::vector<cv::Mat>& src, std::vector<unsigned short> &out_embed, Config & cfg)
     {
-        int temporal_patch_size=2;
-        int merge_size=2;
-        int patch_size=14;
+        int temporal_patch_size=cfg.vision_config.temporal_patch_size;
+        int merge_size=cfg.vision_config.spatial_merge_size;
+        int patch_size=cfg.vision_config.patch_size;
         int ret;
         timer t;
         t.start();
 
+        unsigned int grid_h = cfg.vision_config.height / cfg.vision_config.patch_size;
+        unsigned int grid_w = cfg.vision_config.width / cfg.vision_config.patch_size;
         if(src.size()==1){
-            return Encode(src[0], out_embed);
+            int grid_t = 1;
+            cfg.image_grid_thw = {{grid_t, grid_h, grid_w}};
+            return Encode(src[0], out_embed, cfg.vision_config.height, cfg.vision_config.width);
         }
 
         std::vector<std::vector<unsigned char>> pixel_values;
 
-        int w=308, h=308;
+        int w=cfg.vision_config.width, h=cfg.vision_config.height;
+        ALOGI("h %d, w:%d", h,w);
         Qwen2VideoProcessor(  src, pixel_values,
                         h, w,
                         temporal_patch_size, merge_size, patch_size);
 
-        int grid_h =  h/patch_size;
-        int grid_w = w/patch_size;
         int channel = src[0].channels();
         int hwc = grid_h * grid_w * temporal_patch_size * patch_size * patch_size * channel;
+        cfg.video_grid_thw = {{pixel_values.size(), grid_h, grid_w}};
 
         int cnt = 0;
         for(auto &pixel : pixel_values){
@@ -413,22 +417,22 @@ public:
     }
 
 
-    int GetPositionIds(std::vector<int> &input_ids, std::vector<std::vector<int>> &position_ids, std::vector<std::vector<int>>& image_grid_thw, std::vector<std::vector<int>> &video_grid_thw )
+    int GetPositionIds(std::vector<int> &input_ids, std::vector<std::vector<int>> &position_ids, Config &cfg)
     {
-        Config config;
-        config.vision_config.spatial_merge_size = 2;
-        config.image_token_id = 151655;
-        config.video_token_id = 151656;
-        config.vision_start_token_id = 151652;
-        config.vision_config.tokens_per_second = 2;
+        // Config config;
+        // config.vision_config.spatial_merge_size = 2;
+        // config.image_token_id = 151655;
+        // config.video_token_id = 151656;
+        // config.vision_start_token_id = 151652;
+        // config.vision_config.tokens_per_second = 2;
 
-        std::vector<double> second_per_grid_ts = {2};
+        std::vector<double> second_per_grid_ts = {cfg.vision_config.temporal_patch_size/cfg.vision_config.fps}; // temporal_patch_size / fps
 
-        position_ids = get_rope_index(config, input_ids, image_grid_thw, video_grid_thw, second_per_grid_ts);
+        position_ids = get_rope_index(cfg, input_ids, cfg.image_grid_thw, cfg.video_grid_thw, second_per_grid_ts);
         return 0;
     }
 
-    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, std::string prompt = "What is in the image?")
+    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, Config &cfg, std::string prompt = "What is in the image?")
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, false);
         if (input_ids.size() > _attr.prefill_token_num)
@@ -443,29 +447,27 @@ public:
             embed_selector.getByIndex(input_ids[i], out_embed.data() + i * _attr.tokens_embed_size);
         }
 
-        // memcpy(out_embed.data() + 5 * _attr.tokens_embed_size, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
-        std::vector<std::vector<int>> image_grid_thw;
-        std::vector<std::vector<int>> video_grid_thw;
-        GetPositionIds(input_ids, position_ids, image_grid_thw, video_grid_thw);
+        GetPositionIds(input_ids, position_ids, cfg);
         return 0;
     }
 
-    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, std::string prompt = "What is in the image?", const unsigned int img_token_id = -1)
+    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, Config &cfg, std::string prompt = "What is in the image?")
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
         // constexpr int img_token_id = 49190;	// smolvlm
         // constexpr int img_token_id = 151667; // InternVL2.5
         int offset = -1;
+        int vision_start_token_id = cfg.vision_start_token_id;
         for (size_t i = 0; i < input_ids.size(); i++)
         {
-            if (input_ids[i] == img_token_id)
+            if (input_ids[i] == vision_start_token_id)
             {
                 offset = i;
                 break;
             }
         }
-
+        
         if (input_ids.size() > _attr.prefill_token_num)
         {
             ALOGE("input_ids(%d) > prefill_token_num(%d)", input_ids.size(), _attr.prefill_token_num);
@@ -479,20 +481,17 @@ public:
         }
         memcpy(out_embed.data() + offset * _attr.tokens_embed_size, img_embed.data(), img_embed.size() * sizeof(unsigned short));
 
-
-        std::vector<std::vector<int>> image_grid_thw;
-        std::vector<std::vector<int>> video_grid_thw = {{4, 22, 22}};       // just support image size 308x308 , 22*14=308
-        GetPositionIds(input_ids, position_ids, image_grid_thw, video_grid_thw);
+        GetPositionIds(input_ids, position_ids, cfg);
 
         return 0;
     }
 
-    std::string Run(std::string input_str, std::vector<std::vector<int>> &position_ids)
-    {
-        std::vector<unsigned short> test_embed;
-        Encode(test_embed, position_ids, input_str);
-        return Run(test_embed, position_ids);
-    }
+    // std::string Run(std::string input_str, std::vector<std::vector<int>> &position_ids, Config &cfg)
+    // {
+    //     std::vector<unsigned short> test_embed;
+    //     Encode(test_embed, position_ids, cfg, input_str);
+    //     return Run(test_embed, position_ids);
+    // }
 
     std::string Run(std::vector<unsigned short> test_embed,  std::vector<std::vector<int>> &position_ids)
     {

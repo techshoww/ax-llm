@@ -6,7 +6,7 @@
 --bos 0 --eos 0 \
 --dynamic_load_axmodel_layer 1 \
 --use_mmap_load_embed 1 \
---filename_tokenizer_model "http://10.122.86.184:8080" \
+--filename_tokenizer_model "http://localhost:8080" \
 --filename_post_axmodel "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_512/qwen2_5_vl_post.axmodel" \
 --use_topk 0 \
 --filename_tokens_embed "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_512/model.embed_tokens.weight.bfloat16.bin" \
@@ -16,6 +16,6 @@
 --continue 1 \
 --img_width 308 \
 --img_height 308 \
---img_token_id 151652 \
+--vision_start_token_id 151652 \
 --post_config_path post_config.json \
 --prompt "$1" --image "$2"
