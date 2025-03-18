@@ -64,7 +64,24 @@ python qwen2_tokenizer_image_448.py --host {your host} --port {your port}   # �
 2) 将 `scripts/run_qwen2_5vl_image.sh`, `src/post_config.json` ,`build/install/bin/main`, `assets/demo.jpg` 拷贝到爱芯板子上  
 3) 运行 `run_qwen2_5vl_image.sh`  
 ```shell
+root@ax650 Qwen2.5-VL-3B-Instruct-Infer # bash run_qwen2_5vl_image.sh 
+[I][                            Init][ 129]: LLM init start
+bos_id: -1, eos_id: 151645
+  2% | █                                 |   1 /  40 [0.05s<2.00s, 20.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
+100% | ████████████████████████████████ |  40 /  40 [19.48s<19.48s, 2.05 count/s] init vpm axmodel ok,remain_cmm(2559 MB)650-prefill_320/qwen2_5_vl_p320_l35_together.axmodel ok
+[I][                            Init][ 277]: max_token_len : 1023
+[I][                            Init][ 282]: kv_cache_size : 256, kv_cache_num: 1023
+[I][                            Init][ 290]: prefill_token_num : 320
+[I][                            Init][ 292]: vpm_height : 1024,vpm_width : 392
+[I][                            Init][ 301]: LLM init ok
+Type "q" to exit, Ctrl+c to stop current running
+prompt >> prompt >> Describe this image.
+image >> demo.jpg
+[I][                          Encode][ 416]: image encode time : 794.763000 ms, size : 524288
+[I][                             Run][ 633]: ttft: 43535.27 ms
+The image shows a person and a dog sitting on a sandy beach. The person is wearing a plaid shirt and shorts, and the dog is wearing a harness. They appear to be looking at something on a device, possibly a phone or tablet, which the person is holding. The beach is sandy and there are footprints in the sand. The background shows the ocean with waves crashing onto the shore, and the sun is low in the sky, suggesting it might be early morning or late afternoon.
 
+[N][                             Run][ 774]: hit eos,avg 0.03 token/s
 ```
 
 ### 2. 视频理解
