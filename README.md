@@ -117,8 +117,8 @@ python qwen2_tokenizer_video_308.py --host {your host} --port {your port}   # �
 
 ## Reference
 
-- [InternVL2-1B](https://huggingface.co/OpenGVLab/InternVL2-1B)
-- [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct)
+- [Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
+
 ## 技术讨论
 
 - Github issues
