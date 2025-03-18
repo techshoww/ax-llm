@@ -19,6 +19,7 @@
 
 - InternVL2-1B
 - SmolVLM-256M-Instruct
+- InternVL2_5-1B-MPO
 
 ### 获取地址
 
@@ -107,6 +108,7 @@ In summary, the image depicts the Statue of Liberty, a large, historic statue lo
 
 - [InternVL2-1B](https://huggingface.co/OpenGVLab/InternVL2-1B)
 - [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct)
+- [InternVL2_5-1B-MPO](https://huggingface.co/OpenGVLab/InternVL2_5-1B-MPO)
 ## 技术讨论
 
 - Github issues
