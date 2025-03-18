@@ -17,13 +17,11 @@
 
 ### 已支持模型
 
-- InternVL2-1B
-- SmolVLM-256M-Instruct
+- Qwen2.5-VL-3B-Instruct
 
 ### 获取地址
 
-- InternVL2-1B [百度网盘](https://pan.baidu.com/s/1_LG-sPKnLS_LTWF3Cmcr7A?pwd=ph0e)
-- SmolVLM-256M-Instruct [下载地址](https://github.com/techshoww/ax-llm/releases/download/v1.0.0/SmolVLM-256M-Instruct-AX650.tar.gz) 。推荐这里面的模型[AXERA huggingface](https://huggingface.co/AXERA-TECH/SmolVLM-256M-Instruct)，这里面的模型编译的prefill_len更小，跑的更快。
+comming soon
 
 ## 源码编译
 
@@ -51,57 +49,71 @@
   
 ## 运行示例
 
-### SmolVLM-256M-Instruct
+### 1. 图像理解
 
 ![demo.jpg](assets/demo.jpg)
 
 #### 1. 首先启动 HTTP Tokenizer Server  
 ```
 cd scripts
-python smolvlm_tokenizer_512.py  --host {your host} --port {your port}   # 和 run_smolvlm.sh 中一致
+python qwen2_tokenizer_image_448.py --host {your host} --port {your port}   # 和 run_qwen2_5vl_image.sh 中一致
 ```
 
 #### 2. 在板子上运行模型  
-1) 先修改 `run_smolvlm.sh` 中的http host.  
-2) 将 `scripts/run_smolvlm.sh`, `src/post_config.json` ,`build/install/bin/main`, `assets/demo.jpg` 拷贝到爱芯板子上  
-3) 运行 `run_smolvlm.sh`  
+1) 先修改 `run_qwen2_5vl_image.sh` 中的http host.  
+2) 将 `scripts/run_qwen2_5vl_image.sh`, `src/post_config.json` ,`build/install/bin/main`, `assets/demo.jpg` 拷贝到爱芯板子上  
+3) 运行 `run_qwen2_5vl_image.sh`  
 ```shell
-root@ax650 ~/SmolVLM-256M-Instruct-Infer # bash run_smolvlm.sh 
-[I][                            Init][ 106]: LLM init start
-bos_id: 1, eos_id: 49279
-  2% | █                                 |   1 /  34 [0.01s<0.27s, 125.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
-100% | ████████████████████████████████ |  34 /  34 [1.59s<1.59s, 21.40 count/s] init vpm axmodel ok,remain_cmm(3498 MB)B)
-[I][                            Init][ 254]: max_token_len : 1023
-[I][                            Init][ 259]: kv_cache_size : 192, kv_cache_num: 1023
-[I][                            Init][ 267]: prefill_token_num : 128
-[I][                            Init][ 269]: vpm_height : 512,vpm_width : 512
-[I][                            Init][ 278]: LLM init ok
-Type "q" to exit, Ctrl+c to stop current running
-prompt >> Can you describe this image?
-image >> assets/demo.jpg
-[I][                          Encode][ 337]: image encode time : 119.578003 ms, size : 36864
-[I][                             Run][ 548]: ttft: 57.75 ms
- The image depicts a large, historic statue of Liberty, located in New York City. The statue is a prominent landmark and is known for its iconic presence in the city. The statue is located on a pedestal that is surrounded by a large, circular base. The base of the statue is made of stone and is painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
 
-The statue is made of bronze and is quite large, measuring approximately 100 feet in height. The statue is mounted on a pedestal that is made of stone and is painted in a light blue color. The pedestal is rectangular and is supported by a series of columns. The columns are made of stone and are painted in a light blue color. The statue is surrounded by a large, circular ring that encircles the base.
-
-In the background, there is a large cityscape with a variety of buildings and structures. The sky is clear and blue, indicating that it is a sunny day. The buildings are tall and have a modern architectural style, with large windows and balconies. The buildings are mostly made of glass and steel, and they are painted in a variety of colors.
-
-There are a few trees and bushes visible in the foreground, which are located on the left side of the image. The trees are green and appear to be healthy. There is also a small, white building visible in the background, which is likely a hotel or a small office.
-
-The overall atmosphere of the image is one of peace and tranquility. The statue is a symbol of freedom and liberty, and the surrounding buildings and structures add to the sense of the city's historical and cultural significance.
-
-In summary, the image depicts the Statue of Liberty, a large, historic statue located in New York City. The statue is a prominent landmark and is surrounded by a large, circular ring that encircles the base. The statue is painted in a light blue color and is mounted on a pedestal that is surrounded by a large, circular ring. The statue is surrounded by a large, circular ring that encircles the base. The background includes a large cityscape with tall buildings and a clear blue sky. The overall atmosphere of the image is one of peace and tranquility.
-
-[N][                             Run][ 687]: hit eos,avg 76.88 token/s
 ```
 
-## 推理速度  
+### 2. 视频理解
+
+<div style="
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);  /* 4列等宽 */
+    grid-template-rows: repeat(2, 1fr);     /* 2行等高 */
+    gap: 10px;                              /* 图片间距 */
+    width: 80%;                             /* 容器宽度 */
+    margin: 0 auto;                         /* 居中显示 */
+">
+    <img src="demo_cv308/frame_0075.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0077.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0079.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0081.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0083.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0085.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0087.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+    <img src="demo_cv308/frame_0089.jpg" style="width: 100%; height: 100%; object-fit: cover;">
+</div>
+
+#### 1. 首先启动 HTTP Tokenizer Server  
+```
+cd scripts
+python qwen2_tokenizer_video_308.py --host {your host} --port {your port}   # 和 run_qwen2_5vl_video.sh 中一致
+```
+
+#### 2. 在板子上运行模型  
+1) 先修改 `run_qwen2_5vl_video.sh` 中的http host.  
+2) 将 `scripts/run_qwen2_5vl_video.sh`, `src/post_config.json` ,`build/install/bin/main`, `demo_cv308` 拷贝到爱芯板子上  
+3) 运行 `run_qwen2_5vl_video.sh`  
+```shell
+
+```
+
+## 图像理解推理速度  
 | Stage | Time |
 |------|------|
-| Image Encoder (512x512) | 120 ms  | 
-| Prefill |  57ms    |
-| Decode  |  77 token/s |
+| Image Encoder (448x448) | 790 ms  | 
+| Prefill (320) |  43535.27 ms    |
+| Decode  |   token/s |
+
+## 视频理解推理速度  
+| Stage | Time |
+|------|------|
+| Image Encoder (8x308x308) |  ms  | 
+| Prefill (512) |   ms    |
+| Decode  |   token/s |
 
 ## Reference
 
