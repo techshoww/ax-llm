@@ -2,7 +2,7 @@
 
 # BSP_MSP_DIR 这个变量使用*绝对路径*指定到 SDK 的msp/out目录，如下所示（根据自己的目录修改）
 # 绝对路径 绝对路径 绝对路径 
-BSP_MSP_DIR=$PWD/bsp_msp_out/msp/out/
+BSP_MSP_DIR=~/AI-support/ax650n_bsp_sdk/msp/out/
 echo "bsp dir: ${BSP_MSP_DIR}"
 # 下面会简单判断 BSP 路径是否正确
 if [ ! -d "${BSP_MSP_DIR}" ]; then

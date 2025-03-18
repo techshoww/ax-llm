@@ -1,16 +1,19 @@
-./main_internvl \
---template_filename_axmodel "internvl/qwen2_p128_l%d_together.axmodel" \
+./main \
+--template_filename_axmodel "../InternVL2_5-1B-MPO-AX620E/qwen2_p256_l%d_together.axmodel" \
 --axmodel_num 24 \
---filename_vpm_resampler_axmodedl "internvl/intervl_vision_part.axmodel" \
+--filename_vpm_resampler_axmodedl "../InternVL2_5-1B-MPO-AX620E/vit_intern_sim_space2depth.axmodel" \
 --tokenizer_type 2 \
 --bos 0 --eos 0 \
+--dynamic_load_axmodel_layer 1 \
 --use_mmap_load_embed 1 \
---filename_tokenizer_model "http://10.126.33.167:12345" \
---filename_post_axmodel "internvl/qwen2_post.axmodel" \
+--filename_tokenizer_model "http://localhost:8080" \
+--filename_post_axmodel "../InternVL2_5-1B-MPO-AX620E/qwen2_post.axmodel" \
 --use_topk 0 \
---filename_tokens_embed "internvl/model.embed_tokens.weight.bfloat16.bin" \
+--filename_tokens_embed "../InternVL2_5-1B-MPO-AX620E/model.embed_tokens.weight.bfloat16.bin" \
 --tokens_embed_num 151655 \
 --tokens_embed_size 896 \
 --live_print 1 \
 --continue 1 \
+--img_height 364 \
+--img_width 364 \
 --prompt "$1" --image "$2"
