@@ -1,15 +1,15 @@
 ./main \
---template_filename_axmodel "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_320/qwen2_5_vl_p320_l%d_together.axmodel" \
+--template_filename_axmodel "../Qwen2.5-VL-3B-Instruct-AX650-prefill_320/qwen2_5_vl_p320_l%d_together.axmodel" \
 --axmodel_num 36 \
---filename_vpm_resampler_axmodedl "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_320/Qwen2.5-VL-3B-Instruct_vision_nchw448.axmodel" \
+--filename_vpm_resampler_axmodedl "../Qwen2.5-VL-3B-Instruct-AX650-prefill_320/Qwen2.5-VL-3B-Instruct_vision_nchw448.axmodel" \
 --tokenizer_type 2 \
 --bos 0 --eos 0 \
 --dynamic_load_axmodel_layer 1 \
 --use_mmap_load_embed 1 \
 --filename_tokenizer_model "http://localhost:8080" \
---filename_post_axmodel "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_320/qwen2_5_vl_post.axmodel" \
+--filename_post_axmodel "../Qwen2.5-VL-3B-Instruct-AX650-prefill_320/qwen2_5_vl_post.axmodel" \
 --use_topk 0 \
---filename_tokens_embed "../Qwen2.5-VL-3B-Instruct-AX650-video-prefill_320/model.embed_tokens.weight.bfloat16.bin" \
+--filename_tokens_embed "../Qwen2.5-VL-3B-Instruct-AX650-prefill_320/model.embed_tokens.weight.bfloat16.bin" \
 --tokens_embed_num 151936 \
 --tokens_embed_size 2048 \
 --live_print 1 \

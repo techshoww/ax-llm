@@ -372,24 +372,25 @@ public:
 
         unsigned int grid_h = cfg.vision_config.height / cfg.vision_config.patch_size;
         unsigned int grid_w = cfg.vision_config.width / cfg.vision_config.patch_size;
-        if(src.size()==1){
-            int grid_t = 1;
-            cfg.image_grid_thw = {{grid_t, grid_h, grid_w}};
-            return Encode(src[0], out_embed, cfg.vision_config.height, cfg.vision_config.width);
-        }
-
+       
         std::vector<std::vector<unsigned char>> pixel_values;
 
         int w=cfg.vision_config.width, h=cfg.vision_config.height;
-        ALOGI("h %d, w:%d", h,w);
+        
         Qwen2VideoProcessor(  src, pixel_values,
                         h, w,
                         temporal_patch_size, merge_size, patch_size);
 
         int channel = src[0].channels();
         int hwc = grid_h * grid_w * temporal_patch_size * patch_size * patch_size * channel;
-        cfg.video_grid_thw = {{pixel_values.size(), grid_h, grid_w}};
 
+        if(src.size()==1){
+            int grid_t = 1;
+            cfg.image_grid_thw = {{grid_t, grid_h, grid_w}};
+        }else{
+            cfg.video_grid_thw = {{pixel_values.size(), grid_h, grid_w}};
+        }
+        
         int cnt = 0;
         for(auto &pixel : pixel_values){
 
