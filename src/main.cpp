@@ -204,7 +204,7 @@ int main(int argc, char *argv[])
             else
             {
                 lLaMa.Encode(src, img_embed);
-                lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type));
+                lLaMa.Encode(img_embed, prompt_data, prompt_complete(prompt, attr.tokenizer_type), img_token_id);
                 output = lLaMa.Run(prompt_data);
             }
         }

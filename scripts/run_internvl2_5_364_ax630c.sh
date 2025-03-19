@@ -1,0 +1,20 @@
+./main \
+--template_filename_axmodel "internvl2_5_1b_364_ax630c/qwen2_p256_l%d_together.axmodel" \
+--axmodel_num 24 \
+--filename_vpm_resampler_axmodedl "internvl2_5_1b_364_ax630c/vit_intern_sim_space2depth.axmodel" \
+--tokenizer_type 2 \
+--bos 0 --eos 0 \
+--dynamic_load_axmodel_layer 0 \
+--use_mmap_load_embed 1 \
+--filename_tokenizer_model "http://10.122.86.184:8080" \
+--filename_post_axmodel "internvl2_5_1b_364_ax630c/qwen2_post.axmodel" \
+--use_topk 0 \
+--filename_tokens_embed "internvl2_5_1b_364_ax630c/model.embed_tokens.weight.bfloat16.bin" \
+--tokens_embed_num 151674 \
+--tokens_embed_size 896 \
+--live_print 1 \
+--continue 1 \
+--img_height 364 \
+--img_width 364 \
+--img_token_id 151667 \
+--prompt "$1" --image "$2"
