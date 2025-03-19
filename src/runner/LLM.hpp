@@ -456,15 +456,13 @@ public:
     {
         std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
-        // constexpr int img_token_id = 49190;	// smolvlm
-        // constexpr int img_token_id = 151667; // InternVL2.5
         int offset = -1;
         int vision_start_token_id = cfg.vision_start_token_id;
-        for (size_t i = 0; i < input_ids.size(); i++)
+        for (size_t i = 0; i < input_ids.size()-1; i++)
         {
             if (input_ids[i] == vision_start_token_id)
             {
-                offset = i;
+                offset = i+1;
                 break;
             }
         }
