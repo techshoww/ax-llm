@@ -19,6 +19,10 @@ struct Config {
     int image_token_id;
     int video_token_id;
     int vision_start_token_id;
+    int audio_token_id;
+    int audio_start_token_id;
+    int position_id_per_seconds;
+    int seconds_per_chunk;
 
     std::vector<std::vector<int>> image_grid_thw;   // auto calc
     std::vector<std::vector<int>> video_grid_thw;   // auto calc
