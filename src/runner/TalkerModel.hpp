@@ -15,71 +15,22 @@
 #include "LLMPostprocess.hpp"
 #include "image_processor.hpp"
 #include "mrope.hpp"
-
-typedef void (*LLMRuningCallback)(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve);
-
-static int FindMax(unsigned short *p, int n, float *val = 0)
-    {
-        float max_val = -MAXFLOAT;
-        int max_index = 0;
-        for (int i = 0; i < n; i++)
-        {
-            unsigned int proc = p[i] << 16;
-            float tmp = *reinterpret_cast<float *>(&proc);
-            if (tmp > max_val)
-            {
-                max_val = tmp;
-                max_index = i;
-            }
-        }
-
-        if (val)
-            *val = max_val;
-        return max_index;
-    }
+#include "LLM.hpp"
 
 
-struct LLMAttrType
+class TalkerAttr:LLMAttrType
 {
-    std::string template_filename_axmodel;
-    int axmodel_num;
+    std::string filename_proj_prefill_axmodel;
+    std::string filename_proj_decode_axmodel;
+}
 
-    int prefill_token_num; // auto calc
-
-    std::string filename_post_axmodel;
-
-    TokenizerType tokenizer_type;
-    std::string filename_tokenizer_model;
-    bool b_bos = true, b_eos = false;
-    std::string filename_tokens_embed;
-    int tokens_embed_num ;
-    int tokens_embed_size;
-
-    int max_token_len; // auto calc
-
-    int kv_cache_num; // auto calc
-    int kv_cache_size; // auto calc
-
-    bool b_use_mmap_load_embed = false;
-    bool b_dynamic_load_axmodel_layer = false;
-
-    bool b_use_mmap_load_layer = true;
-
-    bool b_use_topk = false;
-    std::string post_config_path = "post_config.json";
-
-    // bool b_live_print = true;
-    LLMRuningCallback runing_callback = nullptr;
-    void *reserve = nullptr;
-};
-
-class LLM
+class TalkerModel
 {
 private:
-    std::shared_ptr<BaseTokenizer> tokenizer;
+    
     LLaMaEmbedSelector embed_selector;
 
-    LLMAttrType _attr;
+    TalkerAttr _attr;
 
     struct LLMLayer
     {
@@ -92,12 +43,11 @@ private:
     std::vector<LLMLayer> llama_layers;
     ax_runner_ax650 llama_post;
 
-    ax_runner_ax650 vpm_encoder, vpm_resampler;
+    ax_runner_ax650 thinker2talker_proj_prefill;
+    ax_runner_ax650 thinker2talker_proj_decode;
 
     int prefill_grpid = 1;
     int decode_grpid = 0;
-
-    // std::vector<std::vector<unsigned short>> k_caches, v_caches;
 
     bool b_stop = false;
 
@@ -121,25 +71,7 @@ public:
         ALOGI("LLM init start");
         t_cqdm cqdm = create_cqdm(attr.axmodel_num + 4, 32);
         this->_attr = attr;
-        tokenizer = CreateTokenizer(attr.tokenizer_type);
-        if (!tokenizer->Init(attr.filename_tokenizer_model, attr.b_bos, attr.b_eos))
-        {
-            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.filename_tokenizer_model.c_str(), attr.b_bos, attr.b_eos);
-            return false;
-        }
-        update_cqdm(&cqdm, 0, "count", "tokenizer init ok");
-        // test code
-        // {
-        //     std::vector<int> output;
-        //     tokenizer.Encode("Today is National", output);
-        //     // print output
-        //     for (size_t i = 0; i < output.size(); i++)
-        //     {
-        //         printf("%d ", output[i]);
-        //     }
-        //     printf("\n");
-        // }
-
+        
         if (!embed_selector.Init(attr.filename_tokens_embed, attr.tokens_embed_num, attr.tokens_embed_size, attr.b_use_mmap_load_embed))
         {
             ALOGE("embed_selector.Init(%s, %d, %d) failed", attr.filename_tokens_embed.c_str(), attr.tokens_embed_num, attr.tokens_embed_size);
@@ -209,40 +141,19 @@ public:
         sprintf(axmodel_path, "init post axmodel ok,remain_cmm(%d MB)", remain_cmm);
         update_cqdm(&cqdm, attr.axmodel_num + 2, "count", axmodel_path);
 
-        if (_attr.b_vpm_two_stage)
+        ret = thinker2talker_proj_prefill.init(attr.filename_proj_prefill_axmodel.c_str(), false);
+        if (ret != 0)
         {
-            ret = vpm_encoder.init(attr.filename_vpm_encoder_axmodedl.c_str(), false);
-            if (ret != 0)
-            {
-                ALOGE("init vpm axmodel(%s) failed", attr.filename_vpm_encoder_axmodedl.c_str());
-                return false;
-            }
-
-            ret = vpm_resampler.init(attr.filename_vpm_resampler_axmodedl.c_str(), false);
-            if (ret != 0)
-            {
-                ALOGE("init vpm axmodel(%s) failed", attr.filename_vpm_resampler_axmodedl.c_str());
-                return false;
-            }
-
-            _attr.vpm_height = vpm_encoder.get_input(0).vShape[1];
-            _attr.vpm_width = vpm_encoder.get_input(0).vShape[2];
-        }
-        else
-        {
-            ret = vpm_resampler.init(attr.filename_vpm_resampler_axmodedl.c_str(), false);
-            if (ret != 0)
-            {
-                ALOGE("init vpm axmodel(%s) failed", attr.filename_vpm_resampler_axmodedl.c_str());
-                return false;
-            }
-            _attr.vpm_height = vpm_resampler.get_input(0).vShape[1];
-            _attr.vpm_width = vpm_resampler.get_input(0).vShape[2];
+            ALOGE("init thinker2talker_proj axmodel(%s) failed", attr.filename_proj_prefill_axmodel.c_str());
+            return false;
         }
 
-        remain_cmm = get_remaining_cmm_size();
-        sprintf(axmodel_path, "init vpm axmodel ok,remain_cmm(%d MB)", remain_cmm);
-        update_cqdm(&cqdm, attr.axmodel_num + 3, "count", axmodel_path);
+        ret = thinker2talker_proj_decode.init(attr.filename_proj_decode_axmodel.c_str(), false);
+        if (ret != 0)
+        {
+            ALOGE("init thinker2talker_proj axmodel(%s) failed", attr.filename_proj_decode_axmodel.c_str());
+            return false;
+        }
 
         if (attr.b_dynamic_load_axmodel_layer)
         {
@@ -280,8 +191,6 @@ public:
 
             _attr.prefill_token_num = llama_layers[0].layer.get_input(prefill_grpid, "indices").vShape[1];
             ALOGI("prefill_token_num : %d", _attr.prefill_token_num);
-
-            ALOGI("vpm_height : %d,vpm_width : %d", _attr.vpm_height, _attr.vpm_width);
         }
         if (attr.b_dynamic_load_axmodel_layer)
         {
@@ -306,107 +215,14 @@ public:
             llama_layers[i].layer.release();
         }
         llama_post.release();
-        vpm_encoder.release();
-        vpm_resampler.release();
+        thinker2talker_proj_prefill.release();
+        thinker2talker_proj_decode.release();
         embed_selector.Deinit();
     }
 
     void Stop()
     {
         b_stop = true;
-    }
-
-    int Encode(cv::Mat& src, std::vector<unsigned short> &out_embed, int height, int width)
-    {
-        timer t;
-        t.start();
-        cv::Mat dst;
-        cv::resize(src, dst, cv::Size(width, height));
-        cv::cvtColor(dst, dst, cv::COLOR_BGR2RGB);
-
-        if (_attr.b_vpm_two_stage)
-        {
-            void *data = vpm_encoder.get_input(0).pVirAddr;
-            memcpy(data, dst.data, dst.rows * dst.cols * 3);
-            vpm_encoder.inference();
-            AX_SYS_MinvalidateCache(vpm_encoder.get_output(0).phyAddr, vpm_encoder.get_output(0).pVirAddr, vpm_encoder.get_output(0).nSize);
-            memcpy(vpm_resampler.get_input(0).pVirAddr, vpm_encoder.get_output(0).pVirAddr, vpm_encoder.get_output(0).nSize);
-        }
-        else
-        {
-            void *data = vpm_resampler.get_input(0).pVirAddr;
-            memcpy(data, dst.data, dst.rows * dst.cols * 3);
-        }
-
-        vpm_resampler.inference();
-        out_embed.resize(vpm_resampler.get_output(0).nSize / sizeof(float));
-        AX_SYS_MinvalidateCache(vpm_resampler.get_output(0).phyAddr, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
-
-        float *output_data = (float *)vpm_resampler.get_output(0).pVirAddr;
-        for (size_t i = 0; i < out_embed.size(); i++)
-        {
-            out_embed[i] = bfloat16(output_data[i]).data;
-        }
-
-        // memcpy(out_embed.data(), vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
-        ALOGI("image encode time : %f ms, size : %d", t.cost(), out_embed.size());
-        return 0;
-    }
-
-    int Encode(std::vector<cv::Mat>& src, std::vector<unsigned short> &out_embed, Config & cfg)
-    {
-        int temporal_patch_size=cfg.vision_config.temporal_patch_size;
-        int merge_size=cfg.vision_config.spatial_merge_size;
-        int patch_size=cfg.vision_config.patch_size;
-        int ret;
-        timer t;
-        t.start();
-
-        unsigned int grid_h = cfg.vision_config.height / cfg.vision_config.patch_size;
-        unsigned int grid_w = cfg.vision_config.width / cfg.vision_config.patch_size;
-       
-        std::vector<std::vector<unsigned char>> pixel_values;
-
-        int w=cfg.vision_config.width, h=cfg.vision_config.height;
-        
-        Qwen2VideoProcessor(  src, pixel_values,
-                        h, w,
-                        temporal_patch_size, merge_size, patch_size);
-
-        int channel = src[0].channels();
-        int hwc = grid_h * grid_w * temporal_patch_size * patch_size * patch_size * channel;
-
-        if(src.size()==1){
-            int grid_t = 1;
-            cfg.image_grid_thw = {{grid_t, grid_h, grid_w}};
-        }else{
-            cfg.video_grid_thw = {{pixel_values.size(), grid_h, grid_w}};
-        }
-        
-        int cnt = 0;
-        for(auto &pixel : pixel_values){
-
-            void *data = vpm_resampler.get_input(0).pVirAddr;
-            memcpy(data, pixel.data(), hwc);
-            vpm_resampler.inference();
-
-            size_t size = vpm_resampler.get_output(0).nSize / sizeof(float);
-            if(out_embed.empty()){
-                out_embed.resize( size * pixel_values.size() );
-            }
-            
-            AX_SYS_MinvalidateCache(vpm_resampler.get_output(0).phyAddr, vpm_resampler.get_output(0).pVirAddr, vpm_resampler.get_output(0).nSize);
-
-            float *output_data = (float *)vpm_resampler.get_output(0).pVirAddr;
-            for (size_t i = 0; i < size; i++)
-            {
-                out_embed[cnt++] = bfloat16(output_data[i]).data;
-            }
-
-        }
-
-        ALOGI("image encode time : %f ms, size : %d", t.cost(), out_embed.size());
-        return 0;
     }
 
 
@@ -422,27 +238,6 @@ public:
         std::vector<double> second_per_grid_ts = {cfg.vision_config.temporal_patch_size/cfg.vision_config.fps}; // temporal_patch_size / fps
 
         position_ids = get_rope_index(cfg, input_ids, cfg.image_grid_thw, cfg.video_grid_thw, second_per_grid_ts);
-        return 0;
-    }
-
-    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, Config &cfg, std::string prompt = "What is in the image?")
-    {
-        std::vector<int> input_ids = tokenizer->Encode(prompt, false);
-        if (input_ids.size() > _attr.prefill_token_num)
-        {
-            ALOGE("input_ids(%d) > prefill_token_num(%d)", input_ids.size(), _attr.prefill_token_num);
-            return -1;
-        }
-        out_embed.resize(input_ids.size() * _attr.tokens_embed_size);
-
-        for (size_t i = 0; i < input_ids.size(); i++)
-        {
-            embed_selector.getByIndex(input_ids[i], out_embed.data() + i * _attr.tokens_embed_size);
-        }
-
-        cfg.image_grid_thw.clear();
-        cfg.video_grid_thw.clear();
-        GetPositionIds(input_ids, position_ids, cfg);
         return 0;
     }
 
@@ -479,12 +274,6 @@ public:
         return 0;
     }
 
-    // std::string Run(std::string input_str, std::vector<std::vector<int>> &position_ids, Config &cfg)
-    // {
-    //     std::vector<unsigned short> test_embed;
-    //     Encode(test_embed, position_ids, cfg, input_str);
-    //     return Run(test_embed, position_ids);
-    // }
 
     std::string Run(std::vector<unsigned short> test_embed,  std::vector<std::vector<int>> &position_ids)
     {

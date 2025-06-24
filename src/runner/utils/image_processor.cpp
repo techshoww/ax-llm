@@ -4,6 +4,21 @@
 #include "files.hpp"
 #include "image_processor.hpp"
 #include <iostream>
+#include <iostream>
+#include <vector>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm>
+
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libswresample/swresample.h>
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
+}
 
 std::vector<cv::Mat> ReadImages(std::string path){
     std::vector<cv::Mat> src;
@@ -59,6 +74,237 @@ void normalizeMeanStd(cv::Mat& image) {
 
     // 将结果转换回原始数据类型（如8位无符号整数）
     floatImage.convertTo(image, image.type());  // 转换回原始格式 <button class="citation-flag" data-index="6">
+}
+
+std::vector<float> extract_audio_from_video(const char* filename, int target_sample_rate) {
+    // 初始化 FFmpeg
+    avformat_network_init();
+    AVFormatContext* format_ctx = nullptr;
+    if (avformat_open_input(&format_ctx, filename, nullptr, nullptr) != 0) {
+        std::cerr << "Error: Could not open video file" << std::endl;
+        return {};
+    }
+
+    // 探测流信息
+    if (avformat_find_stream_info(format_ctx, nullptr) < 0) {
+        std::cerr << "Error: Could not find stream info" << std::endl;
+        avformat_close_input(&format_ctx);
+        return {};
+    }
+
+    // 定位音频流索引
+    int audio_stream_idx = -1;
+    for (int i = 0; i < format_ctx->nb_streams; i++) {
+        if (format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio_stream_idx = i;
+            break;
+        }
+    }
+    if (audio_stream_idx == -1) {
+        std::cerr << "Error: No audio stream found" << std::endl;
+        avformat_close_input(&format_ctx);
+        return {};
+    }
+
+    // 获取解码器并打开
+    AVCodecParameters* codec_params = format_ctx->streams[audio_stream_idx]->codecpar;
+    AVCodec* codec = avcodec_find_decoder(codec_params->codec_id);
+    AVCodecContext* codec_ctx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(codec_ctx, codec_params);
+    if (avcodec_open2(codec_ctx, codec, nullptr) < 0) {
+        std::cerr << "Error: Could not open codec" << std::endl;
+        avformat_close_input(&format_ctx);
+        return {};
+    }
+
+    // 初始化重采样器（调整采样率/声道）
+    SwrContext* swr_ctx = swr_alloc_set_opts(nullptr,
+        AV_CH_LAYOUT_MONO,                   // 目标声道（单声道）
+        AV_SAMPLE_FMT_FLT,                    // 目标格式（Float PCM）
+        target_sample_rate,                    // 目标采样率（如16000）
+        codec_ctx->channel_layout,            // 源声道布局
+        codec_ctx->sample_fmt,                // 源格式
+        codec_ctx->sample_rate,               // 源采样率
+        0, nullptr);
+    swr_init(swr_ctx);
+
+    // 读取音频包并解码
+    AVPacket packet;
+    AVFrame* frame = av_frame_alloc();
+    std::vector<float> audio_data;
+    while (av_read_frame(format_ctx, &packet) >= 0) {
+        if (packet.stream_index != audio_stream_idx) continue;
+        
+        if (avcodec_send_packet(codec_ctx, &packet) < 0) continue;
+        while (avcodec_receive_frame(codec_ctx, frame) == 0) {
+            // 重采样到目标格式
+            float* buffer;
+            av_samples_alloc((uint8_t**)&buffer, nullptr, 1, frame->nb_samples, AV_SAMPLE_FMT_FLT, 0);
+            int sample_count = swr_convert(swr_ctx, (uint8_t**)&buffer, frame->nb_samples, (const uint8_t**)frame->data, frame->nb_samples);
+            
+            // 存储到 vector
+            audio_data.insert(audio_data.end(), buffer, buffer + sample_count);
+            av_freep(&buffer);
+        }
+        av_packet_unref(&packet);
+    }
+
+    // 清理资源
+    swr_free(&swr_ctx);
+    av_frame_free(&frame);
+    avcodec_free_context(&codec_ctx);
+    avformat_close_input(&format_ctx);
+    return audio_data;
+}
+
+
+struct VideoTensor {
+    std::vector<uint8_t> data;  // 数据布局: T x C x H x W
+    int T;                      // 帧数
+    int C;                      // 通道数
+    int H;                      // 高度
+    int W;                      // 宽度
+    float sample_fps;           // 采样帧率
+};
+
+VideoTensor read_video_ffmpeg(
+    const std::string& video_path, 
+    int target_frames = -1  // 目标帧数 (-1表示自动计算)
+) {
+    // 初始化FFmpeg
+    avformat_network_init();
+    AVFormatContext* format_ctx = nullptr;
+    if (avformat_open_input(&format_ctx, video_path.c_str(), nullptr, nullptr) != 0) {
+        throw std::runtime_error("无法打开视频文件");
+    }
+    if (avformat_find_stream_info(format_ctx, nullptr) < 0) {
+        avformat_close_input(&format_ctx);
+        throw std::runtime_error("无法获取流信息");
+    }
+
+    // 查找视频流
+    int video_stream_idx = -1;
+    for (int i = 0; i < format_ctx->nb_streams; ++i) {
+        if (format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            video_stream_idx = i;
+            break;
+        }
+    }
+    if (video_stream_idx == -1) {
+        avformat_close_input(&format_ctx);
+        throw std::runtime_error("未找到视频流");
+    }
+
+    // 初始化解码器
+    AVCodecParameters* codec_params = format_ctx->streams[video_stream_idx]->codecpar;
+    const AVCodec* codec = avcodec_find_decoder(codec_params->codec_id);
+    AVCodecContext* codec_ctx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(codec_ctx, codec_params);
+    if (avcodec_open2(codec_ctx, codec, nullptr) < 0) {
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&format_ctx);
+        throw std::runtime_error("无法打开解码器");
+    }
+
+    // 获取视频信息
+    AVStream* stream = format_ctx->streams[video_stream_idx];
+    const int total_frames = stream->nb_frames > 0 ? 
+        stream->nb_frames : 
+        static_cast<int>(stream->duration * av_q2d(stream->time_base) * av_q2d(stream->avg_frame_rate));
+    const float video_fps = av_q2d(stream->avg_frame_rate);
+
+    // 计算目标帧数
+    const int nframes = (target_frames > 0) ? 
+        std::min(target_frames, total_frames) : 
+        total_frames;
+    std::vector<int> frame_indices;
+    for (int i = 0; i < nframes; ++i) {
+        frame_indices.push_back(static_cast<int>(std::round(
+            i * (total_frames - 1.0) / (nframes - 1.0)
+        )));
+    }
+
+    // 准备图像转换
+    SwsContext* sws_ctx = sws_getContext(
+        codec_ctx->width, codec_ctx->height, codec_ctx->pix_fmt,
+        codec_ctx->width, codec_ctx->height, AV_PIX_FMT_RGB24,
+        SWS_BILINEAR, nullptr, nullptr, nullptr
+    );
+
+    // 准备输出张量
+    VideoTensor tensor;
+    tensor.T = nframes;
+    tensor.C = 3;  // RGB
+    tensor.H = codec_ctx->height;
+    tensor.W = codec_ctx->width;
+    tensor.data.resize(nframes * tensor.C * tensor.H * tensor.W);
+
+    // 解码帧
+    AVFrame* frame = av_frame_alloc();
+    AVFrame* rgb_frame = av_frame_alloc();
+    const int rgb_size = av_image_get_buffer_size(AV_PIX_FMT_RGB24, tensor.W, tensor.H, 1);
+    uint8_t* rgb_buffer = static_cast<uint8_t*>(av_malloc(rgb_size));
+    av_image_fill_arrays(rgb_frame->data, rgb_frame->linesize, rgb_buffer, 
+                         AV_PIX_FMT_RGB24, tensor.W, tensor.H, 1);
+    
+    AVPacket packet;
+    int current_frame = 0;
+    size_t next_target = 0;
+    uint8_t* tensor_ptr = tensor.data.data();
+
+    while (av_read_frame(format_ctx, &packet) >= 0 && next_target < frame_indices.size()) {
+        if (packet.stream_index != video_stream_idx) {
+            av_packet_unref(&packet);
+            continue;
+        }
+
+        if (avcodec_send_packet(codec_ctx, &packet) < 0) {
+            av_packet_unref(&packet);
+            continue;
+        }
+
+        while (avcodec_receive_frame(codec_ctx, frame) >= 0) {
+            // 检查是否为需要的帧
+            if (current_frame == frame_indices[next_target]) {
+                // 转换为RGB
+                sws_scale(sws_ctx, 
+                          frame->data, frame->linesize, 0, frame->height,
+                          rgb_frame->data, rgb_frame->linesize);
+                
+                // 从HWC转换为CHW
+                for (int c = 0; c < 3; ++c) {
+                    for (int h = 0; h < tensor.H; ++h) {
+                        const uint8_t* src = rgb_frame->data[0] + h * rgb_frame->linesize[0] + c;
+                        uint8_t* dest = tensor_ptr + 
+                                        c * tensor.H * tensor.W + 
+                                        h * tensor.W;
+                        
+                        for (int w = 0; w < tensor.W; ++w) {
+                            dest[w] = src[w * 3];
+                        }
+                    }
+                }
+                tensor_ptr += tensor.C * tensor.H * tensor.W;
+                ++next_target;
+            }
+            ++current_frame;
+            av_frame_unref(frame);
+        }
+        av_packet_unref(&packet);
+    }
+
+    // 计算采样帧率
+    tensor.sample_fps = (nframes * video_fps) / total_frames;
+
+    // 清理资源
+    av_free(rgb_buffer);
+    av_frame_free(&rgb_frame);
+    av_frame_free(&frame);
+    avcodec_free_context(&codec_ctx);
+    avformat_close_input(&format_ctx);
+    sws_freeContext(sws_ctx);
+
+    return tensor;
 }
 
 int Qwen2VideoProcessor( std::vector<cv::Mat>& src, std::vector<std::vector<unsigned char>>& output, 
