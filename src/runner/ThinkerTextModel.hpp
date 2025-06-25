@@ -58,7 +58,7 @@ private:
 public:
     bool Init(LLMAttrType attr)
     {
-        ALOGI("LLM init start");
+        ALOGI("ThinkerTextModel init start");
         t_cqdm cqdm = create_cqdm(attr.axmodel_num + 4, 32);
         this->_attr = attr;
         tokenizer = CreateTokenizer(attr.tokenizer_type);

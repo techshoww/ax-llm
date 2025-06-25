@@ -302,6 +302,8 @@ std::vector<std::vector<int>> get_rope_index(
             int text_len, bos_len, audio_len, eos_len;
             if(ed_image < ed_video){
                 min_ed = ed_image;
+            }else{
+                min_ed = ed_video;
             }
             if(min_ed >= ed_audio){
                 min_ed = ed_audio;
