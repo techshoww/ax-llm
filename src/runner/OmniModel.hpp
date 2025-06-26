@@ -21,6 +21,7 @@
 #include "Token2WavDit.hpp"
 #include "AudioEncoder.hpp"
 #include "VisualEncoder.hpp"
+#include "bfloat16.hpp"
 struct OmniAttr
 {
     std::string path_audio_encoder;
@@ -133,6 +134,8 @@ public:
         }
         file.close();
 
+        ReadImages("../imgs", imgs);
+
         return 0;
     }
     
@@ -150,7 +153,7 @@ public:
 
         std::vector<unsigned short> embed_audio;
         std::vector<unsigned short> embed_imgs;
-        ret = audio_encoder.Encode(audio, embed_audio);
+        ret = audio_encoder.Run(audio, embed_audio);
         if(ret!=0){
             ALOGE("audio encoder failed");
             return -1;
@@ -158,23 +161,79 @@ public:
 
         Config config;    
         config.vision_config.temporal_patch_size = 2;
-        config.vision_config.tokens_per_second ;
-        config.vision_config.spatial_merge_size;
+        config.vision_config.tokens_per_second = 25;
+        config.vision_config.spatial_merge_size = 2;
         config.vision_config.patch_size = 14;
         config.vision_config.width = 308;
         config.vision_config.height = 308;
         config.vision_config.fps = 1;
 
-        config.image_token_id ;
-        config.video_token_id ;
-        config.vision_start_token_id;
-        ret = visual_encoder.Encode(imgs, embed_imgs, config);
+        config.image_token_id = 151655;
+        config.video_token_id = 151656;
+        config.vision_start_token_id = 151652;
+        config.audio_token_id = 151646;
+        config.audio_start_token_id = 151647;
+
+        config.seconds_per_chunk = 2;
+        config.position_id_per_seconds = 25;
+
+        ret = visual_encoder.Run(imgs, embed_imgs, config);
         if(ret!=0){
             ALOGE("visual encoder failed");
             return -1;
         }
+        ALOGI("embed_imgs size:%d",embed_imgs.size());
 
 
+        std::vector<std::vector<unsigned short>> thinker_token_embeds;
+        std::vector<std::vector<unsigned short>> thinker_hidden_states;
+        std::vector<int> thinker_generate_ids;
+        std::vector<int> input_ids;
+        readtxt("../python/input_ids.txt", input_ids);
+        ALOGI("input_ids size:%d",input_ids.size());
+        int thinker_hidden_dim = thinker_text_model._attr.tokens_embed_size;
+        ALOGI("thinker_hidden_dim:%d",thinker_hidden_dim);
+        auto text = thinker_text_model.Run(input_ids, embed_audio, embed_imgs, config, thinker_token_embeds, thinker_hidden_states, thinker_generate_ids);
+        ALOGI("text model output:%s", text.c_str());
+        ALOGI("thinker_hidden_states.size:%d, thinker_hidden_states[0].size:%d, thinker_hidden_states[1].size:%d",
+                thinker_hidden_states.size(), thinker_hidden_states[0].size(), thinker_hidden_states[1].size());
+        std::vector<unsigned short> thinker_reply_part( (thinker_hidden_states.size()-1+2)*thinker_hidden_dim, 0);
+
+        
+        unsigned int talker_text_bos_token = 151872;
+        std::vector<int> talker_input_text_ids;
+        talker_input_text_ids.insert(talker_input_text_ids.end(), input_ids.begin(), input_ids.end());
+        talker_input_text_ids.push_back(talker_text_bos_token);
+        talker_input_text_ids.push_back(thinker_generate_ids[0]);
+
+        for(int i=1; i<thinker_hidden_states.size(); i++){
+            for(int j=0; j< thinker_hidden_states[i].size(); j++){
+                float a = float(thinker_hidden_states[i][j]);
+                float b = float(thinker_token_embeds[i][j]);
+                thinker_reply_part[ (i-1)*thinker_hidden_states[i].size() + j ] = bfloat16(a+b).data;
+            }
+        }
+
+
+        std::vector<unsigned short> talker_inputs_embeds( thinker_hidden_states[0].size()+ thinker_hidden_states[1].size()*2, 0 );
+        for(int i=0; i<thinker_hidden_states[0].size(); i++){
+            float a = float(thinker_hidden_states[0][i]);
+            float b = float(thinker_token_embeds[0][i]);
+        }
+
+
+        thinker_text_model.embed_selector.getByIndex(talker_text_bos_token, talker_inputs_embeds.data()+thinker_hidden_states[0].size());
+        memcpy(talker_inputs_embeds.data()+thinker_hidden_states[0].size()+ thinker_hidden_states[1].size(), thinker_reply_part.data(), thinker_hidden_states[1].size()*sizeof(unsigned short));
+
+
+        thinker_text_model.embed_selector.getByIndex(talker_model._attr.text_eos_token, thinker_reply_part.data()+ thinker_reply_part.size()-2*thinker_hidden_dim);
+        thinker_text_model.embed_selector.getByIndex(talker_model._attr.text_pad_token, thinker_reply_part.data()+ thinker_reply_part.size()-1*thinker_hidden_dim);
+
+
+        std::vector<int> talker_generate_codes;
+        ret = talker_model.Run(talker_inputs_embeds, talker_input_text_ids, thinker_reply_part, config, talker_generate_codes);
+
+        ALOGI("talker_generate_codes size:%d",talker_generate_codes.size());
         return 0;
 
     }

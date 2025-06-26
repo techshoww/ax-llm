@@ -19,8 +19,7 @@ extern "C" {
 // #include <libavutil/imgutils.h>
 }
 
-std::vector<cv::Mat> ReadImages(std::string path){
-    std::vector<cv::Mat> src;
+int ReadImages(std::string path, std::vector<cv::Mat>& src){
 
     if(is_file(path)){
         cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);
@@ -37,9 +36,10 @@ std::vector<cv::Mat> ReadImages(std::string path){
     }
     else{
         std::cerr << "错误的路径: " << path << std::endl;
+        return -1;
     }
 
-    return src;
+    return 0;
 }
 
 std::pair<int, int> SmartResize(int height, int width, int factor){

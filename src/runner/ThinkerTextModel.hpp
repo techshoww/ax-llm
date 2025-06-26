@@ -16,14 +16,15 @@
 #include "image_processor.hpp"
 #include "mrope.hpp"
 #include "LLM.hpp"
+#include "utils/utils.hpp"
 
 class ThinkerTextModel
 {
 private:
     std::shared_ptr<BaseTokenizer> tokenizer;
-    LLaMaEmbedSelector embed_selector;
+    
 
-    LLMAttrType _attr;
+    
 
     struct LLMLayer
     {
@@ -56,6 +57,9 @@ private:
     }
 
 public:
+    LLMAttrType _attr;
+    LLaMaEmbedSelector embed_selector;
+
     bool Init(LLMAttrType attr)
     {
         ALOGI("ThinkerTextModel init start");
@@ -208,56 +212,60 @@ public:
     }
 
 
-    int GetPositionIds(std::vector<int> &input_ids, std::vector<std::vector<int>> &position_ids, Config &cfg)
-    {
-        // Config config;
-        // config.vision_config.spatial_merge_size = 2;
-        // config.image_token_id = 151655;
-        // config.video_token_id = 151656;
-        // config.vision_start_token_id = 151652;
-        // config.vision_config.tokens_per_second = 2;
+    // int GetPositionIds(std::vector<int> &input_ids, std::vector<std::vector<int>> &position_ids, Config &cfg)
+    // {
+    //     // Config config;
+    //     // config.vision_config.spatial_merge_size = 2;
+    //     // config.image_token_id = 151655;
+    //     // config.video_token_id = 151656;
+    //     // config.vision_start_token_id = 151652;
+    //     // config.vision_config.tokens_per_second = 2;
 
-        std::vector<double> second_per_grid_ts = {cfg.vision_config.temporal_patch_size/cfg.vision_config.fps}; // temporal_patch_size / fps
+    //     std::vector<double> second_per_grid_ts = {cfg.vision_config.temporal_patch_size/cfg.vision_config.fps}; // temporal_patch_size / fps
 
-        position_ids = get_rope_index(cfg, input_ids, cfg.image_grid_thw, cfg.video_grid_thw, second_per_grid_ts);
-        return 0;
-    }
+    //     position_ids = get_rope_index(cfg, input_ids, cfg.image_grid_thw, cfg.video_grid_thw, second_per_grid_ts);
+    //     return 0;
+    // }
 
-    int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, Config &cfg, std::string prompt = "What is in the image?")
-    {
-        std::vector<int> input_ids = tokenizer->Encode(prompt, true);
+    // int Encode(std::vector<unsigned short> &img_embed, std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, Config &cfg, std::string prompt = "What is in the image?")
+    // {
+    //     std::vector<int> input_ids = tokenizer->Encode(prompt, true);
 
-        int offset = -1;
-        int vision_start_token_id = cfg.vision_start_token_id;
-        for (size_t i = 0; i < input_ids.size()-1; i++)
-        {
-            if (input_ids[i] == vision_start_token_id)
-            {
-                offset = i+1;
-                break;
-            }
-        }
+    //     int offset = -1;
+    //     int vision_start_token_id = cfg.vision_start_token_id;
+    //     for (size_t i = 0; i < input_ids.size()-1; i++)
+    //     {
+    //         if (input_ids[i] == vision_start_token_id)
+    //         {
+    //             offset = i+1;
+    //             break;
+    //         }
+    //     }
         
-        if (input_ids.size() > _attr.prefill_token_num)
-        {
-            ALOGE("input_ids(%d) > prefill_token_num(%d)", input_ids.size(), _attr.prefill_token_num);
-            return -1;
-        }
-        out_embed.resize(input_ids.size() * _attr.tokens_embed_size);
+    //     if (input_ids.size() > _attr.prefill_token_num)
+    //     {
+    //         ALOGE("input_ids(%d) > prefill_token_num(%d)", input_ids.size(), _attr.prefill_token_num);
+    //         return -1;
+    //     }
+    //     out_embed.resize(input_ids.size() * _attr.tokens_embed_size);
 
-        for (size_t i = 0; i < input_ids.size(); i++)
-        {
-            embed_selector.getByIndex(input_ids[i], out_embed.data() + i * _attr.tokens_embed_size);
-        }
-        memcpy(out_embed.data() + offset * _attr.tokens_embed_size, img_embed.data(), img_embed.size() * sizeof(unsigned short));
+    //     for (size_t i = 0; i < input_ids.size(); i++)
+    //     {
+    //         embed_selector.getByIndex(input_ids[i], out_embed.data() + i * _attr.tokens_embed_size);
+    //     }
+    //     memcpy(out_embed.data() + offset * _attr.tokens_embed_size, img_embed.data(), img_embed.size() * sizeof(unsigned short));
 
-        GetPositionIds(input_ids, position_ids, cfg);
+    //     GetPositionIds(input_ids, position_ids, cfg);
 
-        return 0;
-    }
+    //     return 0;
+    // }
 
 
-    std::string Run(std::vector<unsigned short> test_embed,  std::vector<std::vector<int>> &position_ids)
+    std::string Encode(std::vector<unsigned short> test_embed,  
+                    std::vector<std::vector<int>> &position_ids, 
+                    std::vector<std::vector<unsigned short>>& thinker_token_embeds, 
+                    std::vector<std::vector<unsigned short>>& thinker_hidden_states,
+                    std::vector<int>& token_ids)
     {
         b_stop = false;
         std::string final_out;
@@ -266,6 +274,11 @@ public:
         std::vector<unsigned short> mask(_attr.kv_cache_num + 1, bf16.data);
         std::vector<unsigned short> mask_p(_attr.prefill_token_num * _attr.prefill_token_num, bf16.data);
 
+        if (_attr.b_use_topk)
+        {
+            ALOGE("not support topk");
+            return "";
+        }
         for (size_t i = 0; i < _attr.prefill_token_num; i++)
         {
             for (size_t j = 0; j < i + 1; j++)
@@ -275,7 +288,7 @@ public:
         }
 
         std::vector<int> cached_token;
-        std::vector<int> token_ids;
+        // std::vector<int> token_ids;
         int input_embed_num = test_embed.size() / _attr.tokens_embed_size;
 
         mask[_attr.kv_cache_num] = 0;
@@ -364,6 +377,7 @@ public:
             }
             // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
         }
+        thinker_token_embeds.push_back(test_embed);
 
         int next_token = -1;
         t_cqdm cqdm = create_cqdm(_attr.max_token_len, 32);
@@ -399,6 +413,30 @@ public:
             token_ids.push_back(max_index);
             cached_token.push_back(max_index);
             ALOGI("ttft: %.2f ms", ttft_timer.cost());
+            ALOGI("max_index:%d",max_index);
+        }
+
+        {
+            // get norm out
+
+            std::vector<unsigned short> t_normout(test_embed.size(), 0);
+
+            for(int i=0; i < input_embed_num; i++){
+                auto &input = llama_post.get_input("input");
+                memcpy(input.pVirAddr, test_embed.data()+i*_attr.tokens_embed_size,  _attr.tokens_embed_size * sizeof(unsigned short));
+                
+                llama_post.inference();
+                
+                auto &norm_out = llama_post.get_output("norm_out");
+                AX_SYS_MinvalidateCache(norm_out.phyAddr, norm_out.pVirAddr, norm_out.nSize);
+                unsigned short *pout = (unsigned short *)norm_out.pVirAddr;
+                
+                
+                memcpy(t_normout.data()+i*_attr.tokens_embed_size , pout, _attr.tokens_embed_size * sizeof(unsigned short));
+            }
+            ALOGI("t_normout size:%d",t_normout.size());
+            ALOGI("test_embed size:%d", test_embed.size());
+            thinker_hidden_states.push_back(t_normout);
         }
         t_cost.start();
 
@@ -413,6 +451,7 @@ public:
 
             // ALOGI("out %d %d", indices, next_token);
             embed_selector.getByIndex(next_token, embed);
+            thinker_token_embeds.push_back(embed);
             // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
 
             for (int m = 0; m < _attr.axmodel_num; m++)
@@ -497,6 +536,16 @@ public:
                     float max_val = -MAXFLOAT;
                     max_index = post_process(postprocess, post_out, _attr.tokens_embed_num, token_ids, &max_val);
                     // max_index = FindMax(post_out, _attr.tokens_embed_num, &max_val);
+                    ALOGI("max_index:%d",max_index);
+
+
+                    std::vector<unsigned short> t_normout(embed.size(), 0);
+                    auto &norm_out = llama_post.get_output("norm_out");
+                    AX_SYS_MinvalidateCache(norm_out.phyAddr, norm_out.pVirAddr, norm_out.nSize);
+                    unsigned short *pout = (unsigned short *)norm_out.pVirAddr;
+                    memcpy(t_normout.data() , pout, _attr.tokens_embed_size * sizeof(unsigned short));
+                    thinker_hidden_states.push_back(t_normout);
+
                 }
                 next_token = max_index;
 
@@ -547,5 +596,54 @@ public:
         final_out = tokenizer->Decode(token_ids);
 
         return final_out;
+    }
+
+    std::string Run(
+                std::vector<int>& input_ids,
+                std::vector<unsigned short>& embed_audio,  
+                std::vector<unsigned short>& embed_imgs,
+                Config& config,
+                std::vector<std::vector<unsigned short>>& thinker_token_embeds, 
+                std::vector<std::vector<unsigned short>>& thinker_hidden_states,
+                std::vector<int>& thinker_generate_ids)
+    {
+        int offset_audio = -1, offset_video=-1;
+        for(int i=0; i<input_ids.size();i++){
+            if(input_ids[i] == config.audio_token_id  && offset_audio==-1){
+                offset_audio = i;
+            }
+            else if(input_ids[i] == config.video_token_id && offset_video==-1){
+                offset_video = i;
+            }
+
+            if(offset_audio!=-1 && offset_video!=-1){
+                break;
+            }
+        }
+
+        ALOGI("offset audio:%d, offset_video:%d", offset_audio, offset_video);
+       
+
+        std::vector<unsigned short> input_embeds(input_ids.size() *_attr.tokens_embed_size, 0 );
+        ALOGI("input_embeds size:%d",input_embeds.size());
+        for (size_t i = 0; i < input_ids.size(); i++)
+        {
+            embed_selector.getByIndex(input_ids[i], input_embeds.data() + i * _attr.tokens_embed_size);
+        }
+
+        memcpy(input_embeds.data() + offset_audio * _attr.tokens_embed_size, embed_audio.data(), embed_audio.size() * sizeof(unsigned short));
+        memcpy(input_embeds.data() + offset_video * _attr.tokens_embed_size, embed_imgs.data(), embed_imgs.size() * sizeof(unsigned short));
+        // ALOGI("input_embeds size:%d",input_embeds.size());
+
+        // ALOGI("get rope index");
+        // ALOGI("video_grid_thw:%d,%d,%d", config.video_grid_thw[0][0], config.video_grid_thw[0][1], config.video_grid_thw[0][2]);
+        std::vector<std::vector<int>> postion_ids = get_rope_index(config, input_ids, config.image_grid_thw, config.video_grid_thw, true, {160}, {1});
+        // ALOGI("position_ids size:%d, position_ids[0].size:%d", postion_ids.size(), postion_ids[0].size());
+        // savetxt("postion_ids0.txt",postion_ids[0]);
+        // savetxt("postion_ids1.txt",postion_ids[1]);
+        // savetxt("postion_ids2.txt",postion_ids[2]);
+
+        auto text = Encode(input_embeds, postion_ids, thinker_token_embeds, thinker_hidden_states, thinker_generate_ids);
+        return text;
     }
 };

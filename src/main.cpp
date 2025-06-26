@@ -80,6 +80,10 @@ int main(int argc, char *argv[])
     attr_thinker.tokens_embed_size = 2048;
     attr_thinker.b_dynamic_load_axmodel_layer = true;
     attr_thinker.b_use_mmap_load_embed = true;
+    
+    attr_thinker.runing_callback = llm_running_callback;
+    attr_thinker.reserve = 0;
+    
 
     attr.attr_thinker_text_model = attr_thinker;
 

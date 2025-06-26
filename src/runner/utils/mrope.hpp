@@ -34,6 +34,7 @@ std::vector<std::vector<int>> get_rope_index(
     const std::vector<int>& input_ids,
     const std::vector<std::vector<int>>& image_grid_thw,
     const std::vector<std::vector<int>>& video_grid_thw,
-    const std::vector<double>& second_per_grid_ts); 
-
+    const bool use_audio_in_video,
+    const std::vector<int>& audio_seqlens,
+    const std::vector<int>& second_per_grids);
 #endif 

@@ -33,7 +33,7 @@ public:
         model.release();
     }
 
-    int Encode(std::vector<cv::Mat>& src, std::vector<unsigned short> &out_embed, Config & cfg)
+    int Run(std::vector<cv::Mat>& src, std::vector<unsigned short> &out_embed, Config & cfg)
     {
         int temporal_patch_size=cfg.vision_config.temporal_patch_size;
         int merge_size=cfg.vision_config.spatial_merge_size;
