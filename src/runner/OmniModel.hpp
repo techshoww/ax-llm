@@ -280,7 +280,7 @@ public:
 
         savetxt("wav.txt", wav);
 
-        ALOGI("token2wav time : %f ms, size : %d", t.cost(), out_embed.size());
+        ALOGI("token2wav time : %f ms, size : %d", t.cost(), wav.size());
         return 0;
 
     }
