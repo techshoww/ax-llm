@@ -36,31 +36,42 @@ public:
     }
 
     
-
-    
     int sample(
         std::vector<float>& cond,
         std::vector<float>& ref_mel,
         std::vector<int>& code,
-        // int num_steps=10,
-        float guidance_scale=0.5,
-        float sway_coefficient=-1.0,
-        std::vector<float> generated_mel_spec
-    )
+        float guidance_scale,
+        float sway_coefficient,
+        std::vector<float>& generated_mel_spec)
     {
         int max_duration = code.size() * repeats;
-        std::vector<float> y0(max_duration*mel_dim, 0);
-        std::vector<std::vector<int>> cond_e(max_duration, cond);
+        
+        
+        std::vector<std::vector<float>> cond_e(max_duration, cond);
 
         int num_steps=10;
-        float t[10] = {0.0000, 0.0152, 0.0603, 0.1340, 0.2340, 0.3572, 0.5000, 0.6580, 0.8264, 1.0000};
+        std::vector<float> t = {0.0000, 0.0152, 0.0603, 0.1340, 0.2340, 0.3572, 0.5000, 0.6580, 0.8264, 1.0000};
         
         std::vector<float> trajectory(num_steps*max_duration*mel_dim, 0);
 
-        Function fun(未完待续);
+        Function * fun = new Function(ref_mel, cond, code, guidance_scale, &model);
         RungeKutta4ODESolver  solver(fun);
         
+        solver.integrate(t, trajectory);
        
+        if(generated_mel_spec.empty()){
+            generated_mel_spec.resize(max_duration*mel_dim);
+        }
+
+        int start = (num_steps-1)*max_duration*mel_dim;
+        //transpose
+        for(int i=0; i<max_duration;i++){
+            for(int j=0; j<mel_dim;j++){
+                generated_mel_spec[j*max_duration+i] = trajectory[start+i*mel_dim+j];
+            }
+        }
+
+        return 0;
 
     }
            

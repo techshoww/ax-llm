@@ -30,6 +30,7 @@ struct OmniAttr
     TalkerAttr attr_talker_model;
     std::string path_token2wav_dit;
     std::string path_token2wav_bigvgan;
+    int max_len_talker_generate_codes = 600;
 };
 
 class OmniModel
@@ -234,6 +235,52 @@ public:
         ret = talker_model.Run(talker_inputs_embeds, talker_input_text_ids, thinker_reply_part, config, talker_generate_codes);
 
         ALOGI("talker_generate_codes size:%d",talker_generate_codes.size());
+
+        timer t;
+        t.start();
+
+        talker_generate_codes.pop_back();
+        int effictive_len = talker_generate_codes.size();
+        if(effictive_len > _attr.max_len_talker_generate_codes){
+            effictive_len = _attr.max_len_talker_generate_codes;
+        }
+        // 大于max_len_talker_generate_codes 截断了，还需要添加处理
+
+        std::vector<int> code(_attr.max_len_talker_generate_codes, 0);
+        memcpy(code.data(), talker_generate_codes.data(), effictive_len*sizeof(int));
+        
+        std::vector<float> mel_spectrogram;
+
+        std::vector<float> cond;
+        readtxt("cond.txt", cond);
+        std::vector<float> ref_mel;
+        readtxt("ref_mel.txt", ref_mel);
+        token2wav_dit.sample(cond, ref_mel, code,  0.5, -1.0, mel_spectrogram);
+
+
+        void *data = token2wav_bigvgan.get_input("apm_mel").pVirAddr;
+        memcpy(data, mel_spectrogram.data(), mel_spectrogram.size()*sizeof(float));
+
+        token2wav_bigvgan.inference();
+
+        size_t size = token2wav_bigvgan.get_output(0).nSize / sizeof(float);
+        ALOGI("token2wav_bigvgan.get_output size:%d",size);
+        int s = effictive_len*480;
+        if(s > size){
+            s = size;
+        }
+        std::vector<float> wav(s, 0);
+
+        
+        AX_SYS_MinvalidateCache(token2wav_bigvgan.get_output(0).phyAddr, token2wav_bigvgan.get_output(0).pVirAddr, token2wav_bigvgan.get_output(0).nSize);
+
+        float *output_data = (float *)token2wav_bigvgan.get_output(0).pVirAddr;
+
+        memcpy(wav.data(), output_data, s*sizeof(float));
+
+        savetxt("wav.txt", wav);
+
+        ALOGI("token2wav time : %f ms, size : %d", t.cost(), out_embed.size());
         return 0;
 
     }

@@ -425,7 +425,7 @@ public:
 
             token_ids.push_back(max_index);
             cached_token.push_back(max_index);
-            ALOGI("max_index:%d",max_index);
+            // ALOGI("max_index:%d",max_index);
             ALOGI("ttft: %.2f ms", ttft_timer.cost());
         }
         t_cost.start();
@@ -562,7 +562,7 @@ public:
                     break;
                 }
                 token_ids.push_back(max_index);
-                ALOGI("max_index:%d",max_index);
+                // ALOGI("max_index:%d",max_index);
                 // if (_attr.runing_callback)
                 // {
                 //     cached_token.push_back(max_index);
