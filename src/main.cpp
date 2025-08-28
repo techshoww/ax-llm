@@ -125,30 +125,19 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    std::vector<unsigned short> prompt_data;
-    std::vector<std::vector<unsigned short>> img_embed;
-    std::vector<std::vector<int>> position_ids;
+    // for llm
+    std::vector<int> prompt_text_token;
+    std::vector<unsigned short> prompt_text_embeds;
+    std::vector<unsigned short> prompt_speech_embeds;
 
-    Config config;    
-    config.vision_config.temporal_patch_size = cmd.get<int>("temporal_patch_size");
-    config.vision_config.tokens_per_second = cmd.get<int>("tokens_per_second");
-    config.vision_config.spatial_merge_size = cmd.get<int>("spatial_merge_size");
-    config.vision_config.patch_size = cmd.get<int>("patch_size");
-    config.vision_config.width = cmd.get<int>("img_width");
-    config.vision_config.height = cmd.get<int>("img_height");
-    config.vision_config.fps = cmd.get<int>("fps");
-
-    config.image_token_id =  cmd.get<int>("img_token_id");
-    config.video_token_id = cmd.get<int>("video_token_id");
-    config.vision_start_token_id = cmd.get<int>("vision_start_token_id");
-
-	bool b_video = cmd.get<bool>("video");
-
+    // for flow
+    std::vector<float32> prompt_feat;
+    std::vector<float32> prompt_speech_embeds_flow;
+    std::vector<float32> spk_embeds;
     //
     if (b_continue)
     {
         printf("Type \"q\" to exit, Ctrl+c to stop current running\n");
-        // lLaMa.Reset();
     }
 
     while (b_continue)

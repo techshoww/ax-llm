@@ -16,27 +16,6 @@
 
 typedef void (*LLMRuningCallback)(int *p_token, int n_token, float token_per_sec, void *reserve);
 
-static int FindMax(unsigned short *p, int n, float *val = 0)
-    {
-        float max_val = -MAXFLOAT;
-        int max_index = 0;
-        for (int i = 0; i < n; i++)
-        {
-            unsigned int proc = p[i] << 16;
-            float tmp = *reinterpret_cast<float *>(&proc);
-            if (tmp > max_val)
-            {
-                max_val = tmp;
-                max_index = i;
-            }
-        }
-
-        if (val)
-            *val = max_val;
-        return max_index;
-    }
-
-
 struct LLMAttrType
 {
     std::string template_filename_axmodel = "tinyllama-int8/tinyllama_l%d.axmodel";
@@ -616,7 +595,7 @@ public:
                 }
 
                 auto & input_decoder = llm_decoder.get_input(0);
-                memcpy(input_decoder.pVirAddr,logits.data(), output_post.nSize*sizeof(float));
+                memcpy(input_decoder.pVirAddr,logits.data(), output_post.nSize);
 
                 audo & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
@@ -723,7 +702,7 @@ public:
                 }
 
                 auto & input_decoder = llm_decoder.get_input(0);
-                memcpy(input_decoder.pVirAddr, logits.data(), output_post.nSize*sizeof(float));
+                memcpy(input_decoder.pVirAddr, logits.data(), output_post.nSize);
 
                 audo & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
