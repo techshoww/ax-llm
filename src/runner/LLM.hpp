@@ -1,4 +1,11 @@
 #pragma once
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <vector>
+#include <atomic>
 #include <string>
 #include <algorithm>
 #include <cmath>
@@ -13,6 +20,9 @@
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
 
+using SpeechToken = int;
+// The container for speech tokens. std::deque is efficient for front/back operations.
+using TokenBuffer = std::deque<SpeechToken>;
 
 typedef void (*LLMRuningCallback)(int *p_token, int n_token, float token_per_sec, void *reserve);
 
@@ -305,6 +315,14 @@ public:
         b_stop = true;
     }
 
+    int Token2Embeds(std::vector<int> & token_ids,  std::vector<unsigned short> token_embeds)
+    {   
+        for (size_t i = 0; i < token_ids.size(); i++)
+        {
+            embed_selector.getByIndex(token_ids[i], token_embeds.data() + i * _attr.tokens_embed_size);
+        }
+        return token_embeds.size();
+    }
 
     int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>>& position_ids,  std::string text = "What is in the image?", std::vector<unsigned short> & prompt_text_embeds={}, std::vector<unsigned short> &prompt_speech_embeds = {})
     {
@@ -354,15 +372,25 @@ public:
         return 0;
     }
 
-    int Run(std::string input_str, std::vector<unsigned short> & prompt_text_embeds={}, std::vector<unsigned short> &prompt_speech_embeds = {})
+    int Run(std::string input_str, std::vector<unsigned short> & prompt_text_embeds, std::vector<unsigned short> &prompt_speech_embeds,
+            TokenBuffer& token_buffer,
+            std::mutex& buffer_mutex,
+            std::condition_variable& buffer_cv,
+            std::atomic<bool>& llm_finished
+        )
     {
         std::vector<unsigned short> text_embed;
         std::vector<std::vector<int>> position_ids;
-        Encode(text_embed, position_ids, input_str, prompt_text, prompt_speech_tokens);
-        return Run(text_embed, position_ids);
+        Encode(text_embed, position_ids, input_str, prompt_text_embeds, prompt_speech_embeds);
+        return Run(text_embed, position_ids, token_buffer, buffer_mutex, buffer_cv, llm_finished);
     }
 
-    int Run(std::vector<unsigned short>& text_embed, std::vector<std::vector<int>>& position_ids)
+    int Run(std::vector<unsigned short>& text_embed, std::vector<std::vector<int>>& position_ids,
+            TokenBuffer& token_buffer,
+            std::mutex& buffer_mutex,
+            std::condition_variable& buffer_cv,
+            std::atomic<bool>& llm_finished
+    )
     {
         b_stop = false;
         std::string final_out;
@@ -606,12 +634,21 @@ public:
             next_token = max_index;
             
             if (max_index >= _attr.speech_embed_num){
+                llm_finished = true;
+                buffer_cv.notify_all();
+                ALOGI("hit eos, llm finished");
                 b_hit_eos = true;
                 return -1;
             }
 
             token_ids.push_back(max_index);
             cached_token.push_back(max_index);
+            {
+                std::lock_guard<std::mutex> lock(buffer_mutex);
+                token_buffer.push_back(max_index);
+            }
+            buffer_cv.notify_one();
+            ALOGI("token_buffer push %d", max_index);
             ALOGI("ttft: %.2f ms", ttft_timer.cost());
         }
         t_cost.start();
@@ -727,12 +764,22 @@ public:
                         cached_token.clear();
                     }
                     b_hit_eos = true;
+                    llm_finished = true;
+                    buffer_cv.notify_all();
+                    ALOGI("hit eos, llm finished");
                     break;
                 }
 
                 if(max_index < _attr.speech_embed_num)
                 {
                     token_ids.push_back(max_index);
+
+                    {
+                        std::lock_guard<std::mutex> lock(buffer_mutex);
+                        token_buffer.push_back(max_index);
+                    }
+                    buffer_cv.notify_one();
+                    ALOGI("token_buffer push %d", max_index);
 
                     if (_attr.runing_callback)
                     {
@@ -752,6 +799,9 @@ public:
                 update_cqdm(&cqdm, indices, "token", "");
             if (b_hit_eos)
             {
+                llm_finished = true;
+                buffer_cv.notify_all();
+                ALOGI("hit eos, llm finished");
                 break;
             }
         }

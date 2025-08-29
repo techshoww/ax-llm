@@ -1,6 +1,16 @@
+#include <iostream>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <vector>
+#include <atomic>
+#include <chrono> // For simulation delays
+#include <random> // For simulation data
 #include "signal.h"
 
 #include "runner/LLM.hpp"
+#include "runner/Token2wav.hpp
 
 #include "cmdline.hpp"
 
@@ -10,10 +20,83 @@
 
 #include "runner/utils/files.hpp"
 
-#include "runner/utils/mrope.hpp"
 
 static LLM lLaMa;
+static Token2Wav lToken2Wav;
 
+// --- Shared State ---
+TokenBuffer g_token_buffer;              // Shared buffer for tokens
+std::mutex g_buffer_mutex;               // Mutex to protect the buffer
+std::condition_variable g_buffer_cv;     // Condition variable for waiting/notifying
+std::atomic<bool> g_llm_finished{false}; // Flag to signal LLM completion
+
+// --- Constants ---
+const size_t PROCESSING_THRESHOLD = 10; // Minimum tokens needed to trigger processing
+const size_t MAX_BUFFER_SIZE = 100;     // Optional: Limit buffer size to prevent unbounded growth
+
+// --- Simulated Modules ---
+// Simulates the LLM generating tokens and adding them to the buffer.
+
+// Simulates the token2wav processing tokens from the buffer.
+void run_token2wav() {
+    std::cout << "[Main/Token2Wav Thread] Starting to process tokens...\n";
+
+    while (true) {
+        std::unique_lock<std::mutex> lock(g_buffer_mutex);
+
+        // Wait until there are enough tokens OR LLM has finished
+        // The lambda is the predicate that must be true for wait to stop waiting.
+        g_buffer_cv.wait(lock, [] {
+            return g_token_buffer.size() >= PROCESSING_THRESHOLD || g_llm_finished.load();
+        });
+
+        // Check exit condition: Buffer is empty and LLM is done
+        if (g_token_buffer.empty() && g_llm_finished.load()) {
+            std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
+            break;
+        }
+
+        // Check if we should process based on threshold or if LLM is finished
+        if (g_token_buffer.size() >= PROCESSING_THRESHOLD || (g_llm_finished.load() && !g_token_buffer.empty())) {
+            
+            // --- Critical Section: Accessing and Modifying the Buffer ---
+            size_t tokens_to_process = g_token_buffer.size(); // Process all if LLM finished
+            if (!g_llm_finished.load()) {
+                // While LLM is running, process only up to a batch size or what's available
+                tokens_to_process = std::min(tokens_to_process, PROCESSING_THRESHOLD);
+            }
+
+            // Extract tokens to process
+            std::vector<SpeechToken> batch(tokens_to_process);
+            for (size_t i = 0; i < tokens_to_process; ++i) {
+                batch[i] = g_token_buffer.front();
+                g_token_buffer.pop_front();
+            }
+            // --- End of Critical Section ---
+
+            // Release the lock while processing, allowing LLM to produce more tokens
+            lock.unlock();
+
+            // --- Simulate Token2Wav Processing ---
+            std::cout << "[Main/Token2Wav Thread] Processing batch of " << batch.size() << " tokens...\n";
+            // ... (Your actual token-to-wav conversion logic would go here) ...
+            // Simulate processing time
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            std::cout << "[Main/Token2Wav Thread] Finished processing batch.\n";
+            // --- End of Simulation ---
+
+            // Re-lock if needed afterwards (not needed in this loop structure)
+            // std::lock_guard<std::mutex> lock_again(g_buffer_mutex);
+
+        } else {
+            // This else branch is technically not needed because the wait condition
+            // ensures we only get here if one of the conditions is true.
+            // But it's good practice to structure logic clearly.
+            // In this specific loop, we will always process if we wake up.
+            lock.unlock(); // Make sure to unlock if not processing
+        }
+    }
+}
 void __sigExit(int iSigNo)
 {
     lLaMa.Stop();
@@ -26,21 +109,87 @@ void llm_running_callback(int *p_token, int n_token, const char *p_str, float to
     fflush(stdout);
 }
 
-std::string prompt_complete(std::string prompt, TokenizerType tokenizer_type)
+int tts(
+    // for llm
+    std::string & text,
+    std::vector<int> prompt_text_token;
+    std::vector<unsigned short> prompt_speech_embeds;
+    // for flow
+    std::vector<float32> prompt_feat;
+    std::vector<float32> prompt_speech_embeds_flow;
+    std::vector<float32> spk_embeds;
+)
 {
-    std::ostringstream oss_prompt;
-    switch (tokenizer_type)
-    {
-    case TKT_HTTP:
-        oss_prompt << prompt;
-        break;
-    default:
-        ALOGE("tokenizer type %d not support", tokenizer_type);
-        break;
+    lLaMa.Token2Embeds(prompt_text_token, prompt_text_embeds);
+
+    lLaMa.Run(text, prompt_text_embeds, prompt_speech_embeds, 
+                g_token_buffer,
+                g_buffer_mutex,
+                g_buffer_cv,
+                g_llm_finished
+            );
+    
+
+    while (true) {
+        std::unique_lock<std::mutex> lock(g_buffer_mutex);
+
+        // Wait until there are enough tokens OR LLM has finished
+        // The lambda is the predicate that must be true for wait to stop waiting.
+        g_buffer_cv.wait(lock, [] {
+            return g_token_buffer.size() >= PROCESSING_THRESHOLD || g_llm_finished.load();
+        });
+
+        // Check exit condition: Buffer is empty and LLM is done
+        if (g_token_buffer.empty() && g_llm_finished.load()) {
+            std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
+            break;
+        }
+
+        // Check if we should process based on threshold or if LLM is finished
+        if (g_token_buffer.size() >= PROCESSING_THRESHOLD || (g_llm_finished.load() && !g_token_buffer.empty())) {
+            
+            // --- Critical Section: Accessing and Modifying the Buffer ---
+            size_t tokens_to_process = g_token_buffer.size(); // Process all if LLM finished
+            if (!g_llm_finished.load()) {
+                // While LLM is running, process only up to a batch size or what's available
+                tokens_to_process = std::min(tokens_to_process, PROCESSING_THRESHOLD);
+            }
+
+            // Extract tokens to process
+            std::vector<SpeechToken> batch(tokens_to_process);
+            for (size_t i = 0; i < tokens_to_process; ++i) {
+                batch[i] = g_token_buffer.front();
+                g_token_buffer.pop_front();
+            }
+            // --- End of Critical Section ---
+
+            // Release the lock while processing, allowing LLM to produce more tokens
+            lock.unlock();
+
+            // --- Simulate Token2Wav Processing ---
+            std::cout << "[Main/Token2Wav Thread] Processing batch of " << batch.size() << " tokens...\n";
+            // ... (Your actual token-to-wav conversion logic would go here) ...
+            // Simulate processing time
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            std::cout << "[Main/Token2Wav Thread] Finished processing batch.\n";
+            // --- End of Simulation ---
+
+            // Re-lock if needed afterwards (not needed in this loop structure)
+            // std::lock_guard<std::mutex> lock_again(g_buffer_mutex);
+
+        } else {
+            // This else branch is technically not needed because the wait condition
+            // ensures we only get here if one of the conditions is true.
+            // But it's good practice to structure logic clearly.
+            // In this specific loop, we will always process if we wake up.
+            lock.unlock(); // Make sure to unlock if not processing
+        }
     }
 
-    return oss_prompt.str();
 }
+
+
+
 int main(int argc, char *argv[])
 {
     signal(SIGPIPE, SIG_IGN);
@@ -125,6 +274,10 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if (!lToken2Wav.Init("../model_convert/token2wav-axmodels/"))
+    {
+        return -1;
+    }
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;

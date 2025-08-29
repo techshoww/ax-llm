@@ -3,11 +3,17 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <iostream>
+#include <unordered_map>
+#include <vector>
+#include <cstddef> // For size_t
+#include <stdexcept> // For std::invalid_argument
 #include "bfloat16.hpp"
 #include "Tokenizer/Tokenizer.hpp"
 #include "LLMEmbedSelector.hpp"
 #include "ax_model_runner/ax_model_runner_ax650.hpp"
 #include "utils/utils.hpp"
+#include "utils/slice_3d.h"
 #include "ax_cmm_utils.hpp"
 #include "cqdm.h"
 #include "timer.hpp"
@@ -36,10 +42,22 @@ private:
     LLaMaEmbedSelector flow_embed_selector;
     int flow_embed_num = 6561;
     int flow_embed_size = 512;
+    int token_mel_ratio = 2;
+    int token_hop_len = 25;
+    int max_infer_chuk_num = 3;
+    int mel_cache_len = 8;
+    int source_cache_len = mel_cache_len * 480;
 
+    std::unordered_map<std::string, std::vector<float>> hift_cache_dict;
+    std::vector<float> speech_window; // np.hamming(2 * 8 * 480)
     int init_noise(std::string model_dir)
     {
         return 0;
+    }
+
+    int init_speech_window()
+    {
+        return 0; 
     }
 
 public:
@@ -349,7 +367,7 @@ public:
         return ret;
     }
 
-    int infer_flow(
+    std::vector<float> infer_flow(
         std::vector<float> & token_embeds, std::vector<float> & prompt_feat, std::vector<float> & spk_embeds, int token_len, bool finalize,
         std::vector<float> & mel
     )
@@ -363,7 +381,7 @@ public:
         ret = infer_flow_encoder(token_embeds, prompt_feat, spk_embeds, token_len, finalize, mu, spks, cond);
         if(ret != 0)
         {
-            return ret;
+            return std::vector<float>{};
         }
 
         len = mu.size()/80;
@@ -374,7 +392,7 @@ public:
         ret = infer_flow_decoder(mu, spks, cond, mask, all_mel);
         if(ret != 0)
         {
-            return ret;
+            return std::vector<float>{};
         }
 
         int len_mel1 = prompt_feat.size()/80;
@@ -386,13 +404,63 @@ public:
         }
         memcpy(mel.data(), all_mel.data() + len_mel1 * 80, len_mel2 * sizeof(float));
 
-        return 0;
+        auto result = slice_3d_last_dim_from<T>(mel, 1, 80, mel.size()/80, len_mel1);
+
+        return result;
     }
 
-    int token2wav(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> * prompt_feat,  
-                std::vector<float> & spk_embeds, int token_offset, bool finalize,
-                std::vector<float> & tts_speech, std::vector<float> & tts_source)
+    void fade_in_out(std::vector<float>& fade_in_mel_data,
+                 const std::vector<float>& fade_out_mel_data,
+                 const std::vector<float>& window) {
+
+        // --- Constants based on window = np.hamming(2 * 8 * 480) ---
+        const size_t WINDOW_SIZE = 2 * 8 * 480; // 7680
+        const size_t MEL_OVERLAP_LEN = WINDOW_SIZE / 2; // 3840
+        // dim0 is implicitly 1 for both inputs
+        size_t dim1_in = fade_in_mel_data.size();
+        size_t dim1_out = fade_out_mel_data.size();
+        // --- Input Validation ---
+        // For 2D arrays [1, L], the 1D vector size is just L.
+        
+        if (window.size() != WINDOW_SIZE) {
+            throw std::invalid_argument("window size (" + std::to_string(window.size()) +
+                                        ") does not match expected size (7680).");
+        }
+        // Check if input arrays have enough elements for the overlap
+        if (dim1_in < MEL_OVERLAP_LEN) {
+            throw std::invalid_argument("fade_in_mel_data's column count (" + std::to_string(dim1_in) +
+                                        ") is smaller than mel_overlap_len (" + std::to_string(MEL_OVERLAP_LEN) + ").");
+        }
+        if (dim1_out < MEL_OVERLAP_LEN) {
+            throw std::invalid_argument("fade_out_mel_data's column count (" + std::to_string(dim1_out) +
+                                        ") is smaller than mel_overlap_len (" + std::to_string(MEL_OVERLAP_LEN) + ").");
+        }
+
+        // --- Perform Fade In/Out ---
+        // Since dim0=1, we only have one "row" to process.
+        // Iterate through the overlapping elements in the column dimension.
+        for (size_t i = 0; i < MEL_OVERLAP_LEN; ++i) {
+            // Indices are simply 'i' for the start of fade_in_mel
+            // and 'dim1_out - MEL_OVERLAP_LEN + i' for the end of fade_out_mel
+            const size_t in_idx = i;
+            const size_t out_idx = dim1_out - MEL_OVERLAP_LEN + i;
+
+            // Perform the weighted sum: result = in_val * win_in + out_val * win_out
+            // in_val = fade_in_mel_data[in_idx]
+            // out_val = fade_out_mel_data[out_idx]
+            // win_in = window[i]
+            // win_out = window[MEL_OVERLAP_LEN + i]
+            fade_in_mel_data[in_idx] = fade_in_mel_data[in_idx] * window[i] +
+                                    fade_out_mel_data[out_idx] * window[MEL_OVERLAP_LEN + i];
+        }
+        // fade_in_mel_data is now modified in-place with the faded result.
+    }
+
+
+    std::vector<float>  token2wav(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> * prompt_feat,  
+                std::vector<float> & spk_embeds, int token_offset, bool finalize)
     {
+        int ret = 0;
         std::vector<float> speech_embeds;
         std::vector<unsigned short> speech_embeds_one;
 
@@ -411,7 +479,60 @@ public:
 
         std::vector<float> mel;
     
-        int ret = infer_flow(speech_embeds, prompt_feat, spk_embeds, text_speech_token.size(), finalize, mel);   
+        mel = infer_flow(speech_embeds, prompt_feat, spk_embeds, text_speech_token.size(), finalize, mel);   
 
+        std::vector<float> tts_mel;
+        int neg_offset, start;
+        if(finalize)
+        {
+            neg_offset = token_offset * token_mel_ratio - mel.size()/80;
+            start = - token_hop_len * token_mel_ratio;
+        }
+        else{
+            start = min( int(token_offset / token_hot_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
+        }
+        tts_mel = slice_3d_last_dim_from<T>(mel, 1, 80, mel.size()/80, start);
+
+        std::vector<float> hift_cache_source;
+        std::vector<float> tts_mel1;
+        if (!hift_cache_dict.empty())
+        {
+            auto hift_cache_mel = hift_cache_dict["mel"];
+            hift_cache_source = hift_cache_dict["source"];
+            tts_mel1 = concat_3d_dim2(hift_cache_mel, 1, 80, hift_cache_mel.size()/80, tts_mel, 1, 80, tts_mel.size()/80);
+        }
+        
+        std::vector<float> speech, source, tts_speech;
+        ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
+        if(ret != 0){
+            return std::vector<float>{};
+        }
+
+        if(!finalize)
+        {
+            
+            if(!hift_cache_dict.empty())
+            {
+                fade_in_out(speech, hift_cache_dict["speech"], speech_window);
+            }
+
+            hift_cache_dict["mel"] = slice_3d_last_dim_from<T>(tts_mel1, 1, 80, tts_mel1.size()/80, -mel_cache_len);
+            hift_cache_dict["source"] = slice_3d_last_dim_from<T>(source, 1, 1, source.size(), -source_cache_len);
+            hift_cache_dict["speech"] = slice_3d_last_dim_from<T>(speech, 1, 1, speech.size(), -source_cache_len);  // speech 是 2d 的，可以用3d函数按照 dim0 ==1 处理
+
+            tts_speech = slice_3d_last_dim_last_n(speech, 1, 1, speech.size(), source_cache_len);
+        }
+        else{
+            tts_speech = slice_3d_last_dim_from<T>(speech, 1, 1, speech.size(), neg_offset*480);
+
+            if(!hift_cache_dict.empty())
+            {
+                fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
+            }
+        }
+
+        return tts_speech;
     }
+
+    
 }
