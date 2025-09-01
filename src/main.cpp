@@ -182,22 +182,12 @@ int main(int argc, char *argv[])
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
-    // cmd.add<int>("prefill_axmodel_num", 0, "num of axmodel(for template)", true, attr.prefill_axmodel_num);
-    // cmd.add<int>("tokens_embed_num", 0, "tokens embed num", false, attr.tokens_embed_num);
-    // cmd.add<int>("tokens_embed_size", 0, "tokens embed size", false, attr.tokens_embed_size);
-
-    // cmd.add<bool>("use_topk", 0, "", false, attr.b_use_topk);
-    // cmd.add<bool>("use_mmap_load_embed", 0, "it can save os memory", false, attr.b_use_mmap_load_embed);
-    // cmd.add<bool>("dynamic_load_axmodel_layer", 0, "it can save cmm memory", false, attr.b_dynamic_load_axmodel_layer);
-
-    // cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
 
     cmd.parse_check(argc, argv);
 
     text = cmd.get<std::string>("text");
-    // auto image_prompt = cmd.get<std::string>("image");
-    // attr.tokenizer_type = (TokenizerType)cmd.get<int>("tokenizer_type");
+
     attr.filename_tokenizer_model = cmd.get<std::string>("filename_tokenizer_model");
     attr.filename_tokens_embed = cmd.get<std::string>("filename_tokens_embed");
     attr.filename_llm_embed = cmd.get<std::string>("filename_llm_embed");
@@ -205,26 +195,12 @@ int main(int argc, char *argv[])
     attr.filename_post_axmodel = cmd.get<std::string>("filename_post_axmodel");
     attr.filename_decoder_axmodel = cmd.get<std::string>("filename_decoder_axmodel");
     attr.template_filename_axmodel = cmd.get<std::string>("template_filename_axmodel");
-    // attr.template_prefill_filename_axmodel = cmd.get<std::string>("template_prefill_filename_axmodel");
-    // attr.prefill_axmodel_num = cmd.get<int>("prefill_axmodel_num");
 
     attr.b_bos = cmd.get<bool>("bos");
     attr.b_eos = cmd.get<bool>("eos");
-    // attr.b_use_topk = cmd.get<bool>("use_topk");
     attr.axmodel_num = cmd.get<int>("axmodel_num");
     std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
-    // attr.tokens_embed_num = cmd.get<int>("tokens_embed_num");
-    // attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
-
-    // attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
-    // attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
-
-    // bool b_live_print = cmd.get<bool>("live_print");
-    // if (b_live_print)
-    // {
-    //     attr.runing_callback = llm_running_callback;
-    //     attr.reserve = 0;
-    // }
+   
 
     b_continue = cmd.get<bool>("continue");
 
