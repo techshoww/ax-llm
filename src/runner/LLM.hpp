@@ -317,6 +317,11 @@ public:
 
     int TextToken2Embeds(std::vector<int> &token_ids,  std::vector<unsigned short> &token_embeds)
     {   
+        if(token_embeds.empty() || token_embeds.size() < token_ids.size()* _attr.tokens_embed_size)
+        {
+            token_embeds.resize(token_ids.size()* _attr.tokens_embed_size);
+        }
+
         for (size_t i = 0; i < token_ids.size(); i++)
         {
             embed_selector.getByIndex(token_ids[i], token_embeds.data() + i * _attr.tokens_embed_size);
@@ -326,9 +331,14 @@ public:
 
     int SpeechToken2Embeds(std::vector<int> &token_ids,  std::vector<unsigned short> &token_embeds)
     {   
+        if(token_embeds.empty() || token_embeds.size() < token_ids.size()* _attr.speech_embed_size)
+        {
+            token_embeds.resize(token_ids.size()* _attr.speech_embed_size);
+        }
+
         for (size_t i = 0; i < token_ids.size(); i++)
         {
-            speech_embed_selector.getByIndex(token_ids[i], token_embeds.data() + i * _attr.tokens_embed_size);
+            speech_embed_selector.getByIndex(token_ids[i], token_embeds.data() + i * _attr.speech_embed_size);
         }
         return token_embeds.size();
     }
@@ -408,7 +418,7 @@ public:
 
         bfloat16 bf16 = -65536.f;
         std::vector<unsigned short> mask(_attr.kv_cache_num + 1, bf16.data);
-        std::vector<unsigned short> embed(_attr.tokens_embed_size, 0);
+        std::vector<unsigned short> embed(_attr.speech_embed_size, 0);
 
         std::vector<int> cached_token;
         std::vector<int> token_ids;
@@ -572,7 +582,7 @@ public:
                                 sizeof(unsigned short) * input_num_token * _attr.kv_cache_size
                                 );
                 }
-                
+
                 for(int gid=_attr.prefill_grpid+1; gid<prefill_split_num+1; gid++){
                     auto &input_prefill_v_cache = layer.layer.get_input(gid, "V_cache");
                     // axcl_Memcpy((unsigned short *)input_prefill_v_cache.phyAddr + kv_offset,
@@ -608,7 +618,7 @@ public:
         int next_token = -1;
         t_cqdm cqdm = create_cqdm(_attr.max_token_len, 32);
         int max_index;
-        std::vector<float> scores(0, _attr.speech_embed_num+3);
+        std::vector<float> scores(_attr.speech_embed_num, 0.0f);
         {
 
             // post process
@@ -638,8 +648,9 @@ public:
 
                 auto & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
-                
-                memcpy(scores.data(), post_decoder, (_attr.speech_embed_num+3) * sizeof(float));
+
+                // memcpy(scores.data(), post_decoder, _attr.speech_embed_num * sizeof(float));
+                memcpy(scores.data(), post_decoder, output_decoder.nSize);
                 max_index = sampling_ids(scores, cached_token, 25, true);
             }
             next_token = max_index;
@@ -673,9 +684,8 @@ public:
             }
 
 
-            speech_embed_selector.getByIndex(next_token, embed);
-
-            memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").pVirAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize);
+            speech_embed_selector.getByIndex(next_token, embed.data());
+            // memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").pVirAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize);
             // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
 
             for (int m = 0; m < _attr.axmodel_num; m++)
@@ -703,6 +713,9 @@ public:
                         ALOGE("init axmodel(%s) failed", layer.filename.c_str());
                     }
                 }
+
+                auto &input_input = layer.layer.get_input(decode_grpid, "input");
+                memcpy((void *)input_input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
 
                 auto &input_k_cache = layer.layer.get_input(decode_grpid, "K_cache");
                 auto &input_v_cache = layer.layer.get_input(decode_grpid, "V_cache");
@@ -754,14 +767,13 @@ public:
                 auto & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
                 
-                memcpy(scores.data(), post_decoder, (_attr.speech_embed_num+3) * sizeof(float));
+                memcpy(scores.data(), post_decoder, _attr.speech_embed_num * sizeof(float));
                 bool ignore_eos = false;
                 if(indices < min_len)
                 {
                     ignore_eos = true;
                 }
                 max_index = sampling_ids(scores, cached_token, 25, ignore_eos);
-                
                 next_token = max_index;
 
                 if (max_index == _attr.speech_embed_num)
@@ -789,7 +801,7 @@ public:
                         token_buffer.push_back(max_index);
                     }
                     buffer_cv.notify_one();
-                    ALOGI("token_buffer push %d", max_index);
+                    // ALOGI("token_buffer push %d", max_index);
 
                     if (_attr.runing_callback)
                     {
@@ -805,8 +817,8 @@ public:
                 }
             }
 
-            if (_attr.runing_callback == nullptr)
-                update_cqdm(&cqdm, indices, "token", "");
+            // if (_attr.runing_callback == nullptr)
+            //     update_cqdm(&cqdm, indices, "token", "");
             if (b_hit_eos)
             {
                 llm_finished = true;

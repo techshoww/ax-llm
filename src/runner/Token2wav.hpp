@@ -170,20 +170,20 @@ public:
 
     int SpeechToken2Embeds(std::vector<int> & token_ids,  std::vector<float> &token_embeds)
     {   
-       
-        std::vector<unsigned short> speech_embeds_one(0, flow_embed_size);
-
+        if(token_embeds.empty() || token_embeds.size() != token_ids.size()* flow_embed_size)
+        {
+            token_embeds.resize(token_ids.size()* flow_embed_size);
+        }
+        std::vector<unsigned short> speech_embeds_one;
         for (size_t i = 0; i < token_ids.size(); i++)
         {
-            flow_embed_selector.getByIndex(token_ids[i], speech_embeds_one.data());
-
+            flow_embed_selector.getByIndex(token_ids[i], speech_embeds_one);
             for (int j = 0; j < flow_embed_size; j++)
                 {
                     unsigned int proc = speech_embeds_one[i] << 16;
                     token_embeds[i * flow_embed_size + j] = *reinterpret_cast<float *>(&proc);
                 }
         }
-        
         return token_embeds.size();
     }
 
@@ -264,7 +264,7 @@ public:
         }else{
             return -1;
         }
-        
+
         void * p = model->get_input("x").pVirAddr;
         memcpy(p, x.data(), x.size() * sizeof(float));
         p = model->get_input("mask").pVirAddr;
@@ -280,13 +280,13 @@ public:
 
         model->inference();
 
-        auto &output_dphi_dt = model->get_output("dphi_dt");
-        if(dphi_dt.empty())
+        auto &output_dphi_dt = model->get_output("y");
+        if(dphi_dt.empty() || dphi_dt.size() != output_dphi_dt.nSize / sizeof(float))
         {
             dphi_dt.resize(output_dphi_dt.nSize / sizeof(float));
         }
         memcpy(dphi_dt.data(), output_dphi_dt.pVirAddr, output_dphi_dt.nSize);
-        
+
         return 0;
     }
 
@@ -303,6 +303,7 @@ public:
             model = &hift_58;
         }else
         {
+            ALOGE("invalid size: %d", len);
             return -1;
         }
 
@@ -317,14 +318,14 @@ public:
         model->inference();
 
         auto &output_speech = model->get_output("audio");
-        if(tts_speech.empty())
+        if(tts_speech.empty() || tts_speech.size() != output_speech.nSize / sizeof(float))
         {
             tts_speech.resize(output_speech.nSize / sizeof(float));
         }
         memcpy(tts_speech.data(), output_speech.pVirAddr, output_speech.nSize);
 
         auto &output_source = model->get_output("x");
-        if(tts_source.empty())
+        if(tts_source.empty() || tts_source.size() != output_source.nSize / sizeof(float))
         {
             tts_source.resize(output_source.nSize / sizeof(float));
         }
@@ -343,12 +344,12 @@ public:
         float t = t_span[0];
         float dt = t_span[1] - t_span[0];
 
-        std::vector<float> x_in(0, 2*80*len);
-        std::vector<float> mask_in(0, 2*1*len);
-        std::vector<float> mu_in(0, 2*80*len);
-        std::vector<float> t_in(0, 2);
-        std::vector<float> spks_in(0, 2*80);
-        std::vector<float> cond_in(0, 2*80*len);
+        std::vector<float> x_in(2*80*len, 0);
+        std::vector<float> mask_in(2*1*len, 0);
+        std::vector<float> mu_in(2*80*len,0);
+        std::vector<float> t_in(2,0);
+        std::vector<float> spks_in(2*80, 0);
+        std::vector<float> cond_in(2*80*len, 0);
         for(int step=1; step<t_span.size(); step++)
         {   
             memcpy(x_in.data(), x.data(), x.size() * sizeof(float));
@@ -391,6 +392,7 @@ public:
                     mel.resize(x.size());
                 }
                 memcpy(mel.data(), x.data(), x.size() * sizeof(float));
+                ALOGI("mel size %d", mel.size());
             }
 
         }
@@ -411,8 +413,7 @@ public:
     }
 
     std::vector<float> infer_flow(
-        std::vector<float> & token_embeds, std::vector<float> & prompt_feat, std::vector<float> & spk_embeds, int token_len, bool finalize,
-        std::vector<float> & mel
+        std::vector<float> & token_embeds, std::vector<float> & prompt_feat, std::vector<float> & spk_embeds, int token_len, bool finalize
     )
     {
         int ret; 
@@ -420,7 +421,7 @@ public:
         std::vector<float> mu;
         std::vector<float> spks;
         std::vector<float> cond;
-        
+
         ret = infer_flow_encoder(token_embeds, prompt_feat, spk_embeds, token_len, finalize, mu, spks, cond);
         if(ret != 0)
         {
@@ -428,6 +429,7 @@ public:
         }
 
         len = mu.size()/80;
+        ALOGI("len %d", len);
         std::vector<float> mask(len, 1.0);
 
         std::vector<float> all_mel;
@@ -437,18 +439,15 @@ public:
         {
             return std::vector<float>{};
         }
-
+        ALOGI("all_mel size %d",all_mel.size());
+        ALOGI("prompt_feat size %d",prompt_feat.size());
         int len_mel1 = prompt_feat.size()/80;
         int len_mel2 = all_mel.size()/80 - len_mel1;
-
-        if(mel.empty() || mel.size()!=len_mel2)
-        {
-            mel.resize(len_mel2);
-        }
-        memcpy(mel.data(), all_mel.data() + len_mel1 * 80, len_mel2 * sizeof(float));
-
-        auto result = slice_3d_last_dim_from<float>(mel, 1, 80, mel.size()/80, len_mel1);
-
+        ALOGI("len mel1, len mel2 %d %d", len_mel1, len_mel2);
+        std::vector<float> mel(len_mel2 * 80, 0);
+        // memcpy(mel.data(), all_mel.data() + len_mel1 * 80, 80 * len_mel2 * sizeof(float));
+        auto result = slice_3d_last_dim_from<float>(all_mel, 1, 80, all_mel.size()/80, len_mel1);
+        ALOGI("result size:%d", result.size());
         return result;
     }
 
@@ -504,10 +503,10 @@ public:
                 std::vector<float> & spk_embeds, int token_offset, bool finalize)
     {
         int ret = 0;
-        std::vector<float> speech_embeds;
-        std::vector<unsigned short> speech_embeds_one(0, flow_embed_size);
+        std::vector<float> speech_embeds( text_speech_token.size()*flow_embed_size + prompt_speech_embeds.size(), 0.0f);
+        std::vector<unsigned short> speech_embeds_one(flow_embed_size, 0);
 
-        speech_embeds.insert(speech_embeds.end(), prompt_speech_embeds.begin(), prompt_speech_embeds.end());
+        memcpy(speech_embeds.data(), prompt_speech_embeds.data(), prompt_speech_embeds.size() * sizeof(float));
 
         for (size_t i = 0; i < text_speech_token.size(); i++)
         {
@@ -522,7 +521,7 @@ public:
 
         std::vector<float> mel;
     
-        mel = infer_flow(speech_embeds, prompt_feat, spk_embeds, text_speech_token.size(), finalize, mel);   
+        mel = infer_flow(speech_embeds, prompt_feat, spk_embeds, text_speech_token.size(), finalize);   
 
         std::vector<float> tts_mel;
         int neg_offset=0, start;
@@ -534,20 +533,27 @@ public:
         else{
             start = std::min( int(token_offset / token_hop_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
         }
+        ALOGI("token_offset:%d",token_offset);
+        ALOGI("mel size:%d, start:%d", mel.size(), start);
         tts_mel = slice_3d_last_dim_from<float>(mel, 1, 80, mel.size()/80, start);
-
+        ALOGI("tts_mel size:%d, start:%d", tts_mel.size(), start);
         std::vector<float> hift_cache_source;
         std::vector<float> tts_mel1;
+        std::vector<float> speech, source, tts_speech;
         if (!hift_cache_dict.empty())
         {
             auto hift_cache_mel = hift_cache_dict["mel"];
             hift_cache_source = hift_cache_dict["source"];
             tts_mel1 = concat_3d_dim2<float>(hift_cache_mel, 1, 80, hift_cache_mel.size()/80, tts_mel, 1, 80, tts_mel.size()/80);
+            ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
         }
+        else{
+            ret = infer_hift(tts_mel, hift_cache_source, speech, source);
+        }   
+
         
-        std::vector<float> speech, source, tts_speech;
-        ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
         if(ret != 0){
+            ALOGE("failed");
             return std::vector<float>{};
         }
 
@@ -566,6 +572,7 @@ public:
             tts_speech = slice_3d_last_dim_last_n(speech, 1, 1, speech.size(), source_cache_len);
         }
         else{
+            ALOGI("neg_offset：%d", neg_offset);
             tts_speech = slice_3d_last_dim_from<float>(speech, 1, 1, speech.size(), neg_offset*480);
 
             if(!hift_cache_dict.empty())
