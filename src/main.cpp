@@ -7,17 +7,13 @@
 #include <atomic>
 #include <chrono> // For simulation delays
 #include <random> // For simulation data
+#include <opencv2/opencv.hpp>
 #include "signal.h"
-
 #include "runner/LLM.hpp"
 #include "runner/Token2wav.hpp
-
+#include "runner/utils/slice_3d.h"
+#include "runner/utils/wav.hpp"
 #include "cmdline.hpp"
-
-#include <opencv2/opencv.hpp>
-
-#include "runner/utils/image_processor.hpp"
-
 #include "runner/utils/files.hpp"
 
 
@@ -31,161 +27,135 @@ std::condition_variable g_buffer_cv;     // Condition variable for waiting/notif
 std::atomic<bool> g_llm_finished{false}; // Flag to signal LLM completion
 
 // --- Constants ---
-const size_t PROCESSING_THRESHOLD = 10; // Minimum tokens needed to trigger processing
 const size_t MAX_BUFFER_SIZE = 100;     // Optional: Limit buffer size to prevent unbounded growth
 
-// --- Simulated Modules ---
-// Simulates the LLM generating tokens and adding them to the buffer.
 
-// Simulates the token2wav processing tokens from the buffer.
-void run_token2wav() {
-    std::cout << "[Main/Token2Wav Thread] Starting to process tokens...\n";
-
-    while (true) {
-        std::unique_lock<std::mutex> lock(g_buffer_mutex);
-
-        // Wait until there are enough tokens OR LLM has finished
-        // The lambda is the predicate that must be true for wait to stop waiting.
-        g_buffer_cv.wait(lock, [] {
-            return g_token_buffer.size() >= PROCESSING_THRESHOLD || g_llm_finished.load();
-        });
-
-        // Check exit condition: Buffer is empty and LLM is done
-        if (g_token_buffer.empty() && g_llm_finished.load()) {
-            std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
-            break;
-        }
-
-        // Check if we should process based on threshold or if LLM is finished
-        if (g_token_buffer.size() >= PROCESSING_THRESHOLD || (g_llm_finished.load() && !g_token_buffer.empty())) {
-            
-            // --- Critical Section: Accessing and Modifying the Buffer ---
-            size_t tokens_to_process = g_token_buffer.size(); // Process all if LLM finished
-            if (!g_llm_finished.load()) {
-                // While LLM is running, process only up to a batch size or what's available
-                tokens_to_process = std::min(tokens_to_process, PROCESSING_THRESHOLD);
-            }
-
-            // Extract tokens to process
-            std::vector<SpeechToken> batch(tokens_to_process);
-            for (size_t i = 0; i < tokens_to_process; ++i) {
-                batch[i] = g_token_buffer.front();
-                g_token_buffer.pop_front();
-            }
-            // --- End of Critical Section ---
-
-            // Release the lock while processing, allowing LLM to produce more tokens
-            lock.unlock();
-
-            // --- Simulate Token2Wav Processing ---
-            std::cout << "[Main/Token2Wav Thread] Processing batch of " << batch.size() << " tokens...\n";
-            // ... (Your actual token-to-wav conversion logic would go here) ...
-            // Simulate processing time
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            std::cout << "[Main/Token2Wav Thread] Finished processing batch.\n";
-            // --- End of Simulation ---
-
-            // Re-lock if needed afterwards (not needed in this loop structure)
-            // std::lock_guard<std::mutex> lock_again(g_buffer_mutex);
-
-        } else {
-            // This else branch is technically not needed because the wait condition
-            // ensures we only get here if one of the conditions is true.
-            // But it's good practice to structure logic clearly.
-            // In this specific loop, we will always process if we wake up.
-            lock.unlock(); // Make sure to unlock if not processing
-        }
-    }
-}
 void __sigExit(int iSigNo)
 {
     lLaMa.Stop();
     return;
 }
 
-void llm_running_callback(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve)
-{
-    fprintf(stdout, "%s", p_str);
-    fflush(stdout);
-}
+// void llm_running_callback(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve)
+// {
+//     fprintf(stdout, "%s", p_str);
+//     fflush(stdout);
+// }
 
 int tts(
     // for llm
     std::string & text,
-    std::vector<int> prompt_text_token;
-    std::vector<unsigned short> prompt_speech_embeds;
+    std::vector<int> prompt_text_embeds,
+    std::vector<unsigned short> prompt_speech_embeds,
     // for flow
-    std::vector<float32> prompt_feat;
-    std::vector<float32> prompt_speech_embeds_flow;
-    std::vector<float32> spk_embeds;
+    std::vector<float32> prompt_feat,
+    std::vector<float32> prompt_speech_embeds_flow,
+    std::vector<float32> spk_embeds
 )
 {
-    lLaMa.Token2Embeds(prompt_text_token, prompt_text_embeds);
+    std::vector <float> output;
 
-    lLaMa.Run(text, prompt_text_embeds, prompt_speech_embeds, 
-                g_token_buffer,
-                g_buffer_mutex,
-                g_buffer_cv,
-                g_llm_finished
-            );
-    
+    try {
+        // Lambda to capture the LLM instance and shared resources
+        // This makes it easy to pass them to the thread
+        auto llm_thread_func = [&lLaMa, &text, &prompt_text_embeds, &prompt_speech_embeds,  &g_token_buffer, &g_buffer_mutex, &g_buffer_cv, &g_llm_finished]() {
+            lLaMa.Run(text, prompt_text_embeds, prompt_speech_embeds, g_token_buffer, g_buffer_mutex, g_buffer_cv, g_llm_finished);
+        };
 
-    while (true) {
-        std::unique_lock<std::mutex> lock(g_buffer_mutex);
+        // Start the LLM in a separate thread
+        std::thread llm_thread(llm_thread_func);
 
-        // Wait until there are enough tokens OR LLM has finished
-        // The lambda is the predicate that must be true for wait to stop waiting.
-        g_buffer_cv.wait(lock, [] {
-            return g_token_buffer.size() >= PROCESSING_THRESHOLD || g_llm_finished.load();
-        });
+        int token_offset = 0;
+        int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2wav.flow_embed_size;
+        int prompt_token_align_len = int(prompt_token_len / lToken2wav.token_hop_len) * lToken2wav.token_hop_len;
+        auto prompt_speech_embeds_flow1 = slice_3d_last_dim_from<T>(prompt_speech_embeds_flow, 1, 1, prompt_speech_embeds_flow.size(), prompt_token_align_len * lToken2wav.flow_embed_size);
+        auto prompt_feat1 = slice_3d_last_dim_from<T>(prompt_feat, 1, 1, prompt_feat.size(), prompt_token_align_len * 80 * 2);
 
-        // Check exit condition: Buffer is empty and LLM is done
-        if (g_token_buffer.empty() && g_llm_finished.load()) {
-            std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
-            break;
-        }
+        int promot_token_pad = 0;
+        int this_token_hop_len;
+        int i=0;
+        while (true) {
+            // std::this_thread::sleep_for(std::chrono::duration<double>(0.1));
+            this_token_hop_len = (token_offset == 0)? lToken2wav.token_hop_len + promot_token_pad : lToken2wav.token_hop_len;
 
-        // Check if we should process based on threshold or if LLM is finished
-        if (g_token_buffer.size() >= PROCESSING_THRESHOLD || (g_llm_finished.load() && !g_token_buffer.empty())) {
+            std::unique_lock<std::mutex> lock(g_buffer_mutex);
+
+            // Wait until there are enough tokens OR LLM has finished
+            // The lambda is the predicate that must be true for wait to stop waiting.
+            g_buffer_cv.wait(lock, [] {
+                return (g_token_buffer.size() - token_offset >= this_token_hop_len + lToken2Wav.pre_lookahead_len) || \
+                        g_llm_finished.load() ;
+            });
+
+
+            // Check if we should process based on threshold or if LLM is finished
+            if (g_token_buffer.size() >= this_token_hop_len + lToken2Wav.pre_lookahead_len ) {
+                
+                // Extract tokens to process
+                std::vector<SpeechToken> token;
+                int start = token_offset -  std::min( int(token_offset / lToken2Wav.token_hop_len), lToken2Wav.max_infer_chunk_num-1) * lToken2Wav.token_hop_len;
+                int end = token_offset + this_token_hop_len + lToken2Wav.pre_lookahead_len;
+
+                std::copy(g_token_buffer.begin() + start, g_token_buffer.begin() + end, token.begin());
+                // --- End of Critical Section ---
+
+                // Release the lock while processing, allowing LLM to produce more tokens
+                lock.unlock();
+
+                // --- Simulate Token2Wav Processing ---
+                std::cout << "[Main/Token2Wav Thread] Processing batch of " << token.size() << " tokens...\n";
+              
+                audo speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset, false);
+                token_offset += this_token_hop_len;
+
+                //TODO: 另起一个线程处理生成的音频
+                output.insert(output.end(), speech.begin(), speech.end());
+                std::string path = "output_"+std::to_string(i)+".wav";
+                saveVectorAsWavFloat(speech, path, 24000, 1);
+                i += 1;
+
+            } 
             
-            // --- Critical Section: Accessing and Modifying the Buffer ---
-            size_t tokens_to_process = g_token_buffer.size(); // Process all if LLM finished
-            if (!g_llm_finished.load()) {
-                // While LLM is running, process only up to a batch size or what's available
-                tokens_to_process = std::min(tokens_to_process, PROCESSING_THRESHOLD);
+            elif (g_llm_finished.load() ) {
+                std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
+                lock.unlock();
+                break;
+            }
+            // Check exit condition: Buffer is empty and LLM is done
+            else {
+                // This else branch is technically not needed because the wait condition
+                // ensures we only get here if one of the conditions is true.
+                // But it's good practice to structure logic clearly.
+                // In this specific loop, we will always process if we wake up.
+                lock.unlock(); // Make sure to unlock if not processing
             }
 
-            // Extract tokens to process
-            std::vector<SpeechToken> batch(tokens_to_process);
-            for (size_t i = 0; i < tokens_to_process; ++i) {
-                batch[i] = g_token_buffer.front();
-                g_token_buffer.pop_front();
-            }
-            // --- End of Critical Section ---
-
-            // Release the lock while processing, allowing LLM to produce more tokens
-            lock.unlock();
-
-            // --- Simulate Token2Wav Processing ---
-            std::cout << "[Main/Token2Wav Thread] Processing batch of " << batch.size() << " tokens...\n";
-            // ... (Your actual token-to-wav conversion logic would go here) ...
-            // Simulate processing time
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            std::cout << "[Main/Token2Wav Thread] Finished processing batch.\n";
-            // --- End of Simulation ---
-
-            // Re-lock if needed afterwards (not needed in this loop structure)
-            // std::lock_guard<std::mutex> lock_again(g_buffer_mutex);
-
-        } else {
-            // This else branch is technically not needed because the wait condition
-            // ensures we only get here if one of the conditions is true.
-            // But it's good practice to structure logic clearly.
-            // In this specific loop, we will always process if we wake up.
-            lock.unlock(); // Make sure to unlock if not processing
         }
+
+        // Wait for the LLM thread to finish
+        if (llm_thread.joinable()) {
+            llm_thread.join();
+        }
+
+        std::vector<SpeechToken> token;
+        int start = g_token_buffer.size() - std::min( int(g_token_buffer.size() / lToken2Wav.token_hop_len), lToken2Wav.max_infer_chunk_num-1) * lToken2Wav.token_hop_len;
+        std::copy(g_token_buffer.begin() + start, g_token_buffer.end(), token.begin());
+        auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset - start, true);
+        //TODO: 另起一个线程处理生成的音频
+        output.insert(output.end(), speech.begin(), speech.end());
+        std::string path = "output_"+std::to_string(i)+".wav";
+        saveVectorAsWavFloat(speech, path, 24000, 1);
+        saveVectorAsWavFloat(output, "output.wav", 24000, 1);
+
+        g_token_buffer.erase(g_token_buffer.begin(), g_token_buffer.end());
+        std::cout << "\nVoice generation pipeline completed.\n";
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error in pipeline: " << e.what() << std::endl;
+        return 1;
     }
 
+    return 0;
 }
 
 
@@ -195,7 +165,7 @@ int main(int argc, char *argv[])
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, __sigExit);
     LLMAttrType attr;
-    std::string prompt = "Hi";
+    std::string text;
     bool b_continue = true;
 
     cmdline::parser cmd;
@@ -205,35 +175,20 @@ int main(int argc, char *argv[])
     cmd.add<std::string>("filename_post_axmodel", 0, "post axmodel path", false, attr.filename_post_axmodel);
     cmd.add<std::string>("filename_tokenizer_model", 0, "tokenizer model path", false, attr.filename_tokenizer_model);
     cmd.add<std::string>("filename_tokens_embed", 0, "tokens embed path", false, attr.filename_tokens_embed);
-
-    cmd.add<std::string>("filename_image_encoder_axmodedl", 0, "vpm encoder axmodel path", false, attr.filename_image_encoder_axmodedl);
-
+    
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
     // cmd.add<int>("prefill_axmodel_num", 0, "num of axmodel(for template)", true, attr.prefill_axmodel_num);
-    cmd.add<int>("tokens_embed_num", 0, "tokens embed num", false, attr.tokens_embed_num);
-    cmd.add<int>("tokens_embed_size", 0, "tokens embed size", false, attr.tokens_embed_size);
+    // cmd.add<int>("tokens_embed_num", 0, "tokens embed num", false, attr.tokens_embed_num);
+    // cmd.add<int>("tokens_embed_size", 0, "tokens embed size", false, attr.tokens_embed_size);
 
-    cmd.add<bool>("use_topk", 0, "", false, attr.b_use_topk);
-    cmd.add<bool>("use_mmap_load_embed", 0, "it can save os memory", false, attr.b_use_mmap_load_embed);
-    cmd.add<bool>("dynamic_load_axmodel_layer", 0, "it can save cmm memory", false, attr.b_dynamic_load_axmodel_layer);
+    // cmd.add<bool>("use_topk", 0, "", false, attr.b_use_topk);
+    // cmd.add<bool>("use_mmap_load_embed", 0, "it can save os memory", false, attr.b_use_mmap_load_embed);
+    // cmd.add<bool>("dynamic_load_axmodel_layer", 0, "it can save cmm memory", false, attr.b_dynamic_load_axmodel_layer);
 
-    cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
-	cmd.add<bool>("video", 0, "inputs are video", false);
+    // cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
-    cmd.add<int>("img_width", 'w', "image width", true);
-    cmd.add<int>("img_height", 'h', "image height", true);
-    cmd.add<int>("img_token_id", 0, "image token id", false, 151655); 
-    cmd.add<int>("video_token_id", 0, "video token id", false, 151656);
-    cmd.add<int>("vision_start_token_id", 0, "vision_start_token_id", false, 151652);
-    
-    cmd.add<int>("temporal_patch_size", 0, "temporal_patch_size", false, 2);
-    cmd.add<int>("tokens_per_second", 0, "tokens_per_second", false, 2);
-    cmd.add<int>("spatial_merge_size", 0, "spatial_merge_size", false, 2);
-    cmd.add<int>("patch_size", 0, "patch size", false, 14);
-    cmd.add<int>("fps", 0, "fps", false, 1);
-
     cmd.add<std::string>("post_config_path", 0, "post config path", false, attr.post_config_path);
 
     cmd.parse_check(argc, argv);
@@ -248,24 +203,23 @@ int main(int argc, char *argv[])
     // attr.template_prefill_filename_axmodel = cmd.get<std::string>("template_prefill_filename_axmodel");
     // attr.prefill_axmodel_num = cmd.get<int>("prefill_axmodel_num");
 
-    attr.filename_image_encoder_axmodedl = cmd.get<std::string>("filename_image_encoder_axmodedl");
     attr.b_bos = cmd.get<bool>("bos");
     attr.b_eos = cmd.get<bool>("eos");
-    attr.b_use_topk = cmd.get<bool>("use_topk");
+    // attr.b_use_topk = cmd.get<bool>("use_topk");
     attr.axmodel_num = cmd.get<int>("axmodel_num");
-    attr.tokens_embed_num = cmd.get<int>("tokens_embed_num");
-    attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
+    // attr.tokens_embed_num = cmd.get<int>("tokens_embed_num");
+    // attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
 
-    attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
-    attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
+    // attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
+    // attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
     attr.post_config_path = cmd.get<std::string>("post_config_path");
 
-    bool b_live_print = cmd.get<bool>("live_print");
-    if (b_live_print)
-    {
-        attr.runing_callback = llm_running_callback;
-        attr.reserve = 0;
-    }
+    // bool b_live_print = cmd.get<bool>("live_print");
+    // if (b_live_print)
+    // {
+    //     attr.runing_callback = llm_running_callback;
+    //     attr.reserve = 0;
+    // }
 
     b_continue = cmd.get<bool>("continue");
 
@@ -287,6 +241,9 @@ int main(int argc, char *argv[])
     std::vector<float32> prompt_feat;
     std::vector<float32> prompt_speech_embeds_flow;
     std::vector<float32> spk_embeds;
+
+    lLaMa.Token2Embeds(prompt_text_token, prompt_text_embeds);
+
     //
     if (b_continue)
     {
@@ -295,52 +252,32 @@ int main(int argc, char *argv[])
 
     while (b_continue)
     {
-        printf("prompt >> ");
+        printf("text >> ");
         fflush(stdout);
-        std::getline(std::cin, prompt);
-        if (prompt == "q")
+        std::getline(std::cin, text);
+        if (text == "q")
         {
             break;
         }
-        if (prompt == "")
+        if (text == "")
         {
             continue;
         }
 
-        printf("image >> ");
         fflush(stdout);
-        std::string image_prompt;
-        std::getline(std::cin, image_prompt);
-        std::string output;
-        if (image_prompt == "")
-        {
-            lLaMa.Encode(prompt_data, position_ids, config, prompt_complete(prompt, attr.tokenizer_type));
-            output = lLaMa.Run(prompt_data, position_ids);
-        }
-        else
-        {
-            auto src = ReadImages(image_prompt);
-            if (src.empty())
-            {
-                // output = lLaMa.Run(prompt);
-                ALOGE("image prompt(%s) not found", image_prompt.c_str());
-                // continue;
-                lLaMa.Encode(prompt_data, position_ids, config, prompt_complete(prompt, attr.tokenizer_type));
-                output = lLaMa.Run(prompt_data, position_ids);
-            }
-            else
-            {
-                lLaMa.Encode(src, b_video, img_embed, config);
-                lLaMa.Encode(img_embed, prompt_data, position_ids, config, prompt_complete(prompt, attr.tokenizer_type));
-                output = lLaMa.Run(prompt_data, position_ids);
-            }
-        }
+    
+       tts(
+            // for llm
+            text, prompt_text_embeds,prompt_speech_embeds,
+            // for flow
+            prompt_feat, prompt_speech_embeds_flow, spk_embeds
+        );
 
-        if (!b_live_print)
-            printf("%s\n", output.c_str());
+
     }
 
     lLaMa.Deinit();
+    lToken2Wav.Deinit();
 
     return 0;
 }

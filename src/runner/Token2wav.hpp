@@ -47,6 +47,7 @@ private:
     int max_infer_chuk_num = 3;
     int mel_cache_len = 8;
     int source_cache_len = mel_cache_len * 480;
+    int pre_lookahead_len = 3;
 
     std::unordered_map<std::string, std::vector<float>> hift_cache_dict;
     std::vector<float> speech_window; // np.hamming(2 * 8 * 480)
@@ -142,6 +143,20 @@ public:
 
 
 
+    }
+
+    void Deinit()
+    {
+        flow_encoder_28.release();
+        flow_encoder_53.release();
+        flow_encoder_78.release();
+        flow_encoder_50_final.release();
+        flow_estimator_200.release();
+        flow_estimator_250.release();
+        flow_estimator_300.release();
+        hift_50_first.release();
+        hift_58.release();
+        flow_embed_selector.Deinit();
     }
 
     int infer_flow_encoder(
@@ -457,7 +472,7 @@ public:
     }
 
 
-    std::vector<float>  token2wav(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> * prompt_feat,  
+    std::vector<float> infer(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> * prompt_feat,  
                 std::vector<float> & spk_embeds, int token_offset, bool finalize)
     {
         int ret = 0;
@@ -489,7 +504,7 @@ public:
             start = - token_hop_len * token_mel_ratio;
         }
         else{
-            start = min( int(token_offset / token_hot_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
+            start = min( int(token_offset / token_hop_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
         }
         tts_mel = slice_3d_last_dim_from<T>(mel, 1, 80, mel.size()/80, start);
 
