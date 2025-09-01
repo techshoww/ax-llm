@@ -40,17 +40,17 @@ public:
             cli->set_connection_timeout(1);
             cli->set_read_timeout(1);
             cli->set_write_timeout(1);
-            {
-                auto ret = cli->Get("/bos_id");
-                auto rep = ret.value();
-                if (rep.status != 200)
-                {
-                    ALOGE("get bos_id failed, status: %d", rep.status);
-                    return false;
-                }
-                nlohmann::json j = nlohmann::json::parse(rep.body);
-                bos_id = j["bos_id"];
-            }
+            // {
+            //     auto ret = cli->Get("/bos_id");
+            //     auto rep = ret.value();
+            //     if (rep.status != 200)
+            //     {
+            //         ALOGE("get bos_id failed, status: %d", rep.status);
+            //         return false;
+            //     }
+            //     nlohmann::json j = nlohmann::json::parse(rep.body);
+            //     bos_id = j["bos_id"];
+            // }
 
             {
                 auto ret = cli->Get("/eos_id");
@@ -65,31 +65,31 @@ public:
             }
             printf("bos_id: %d, eos_id: %d\n", bos_id, eos_id);
 
-            {
-                auto ret = cli->Get("/img_start_token");
-                auto rep = ret.value();
-                if (rep.status != 200)
-                {
-                    ALOGE("get img_start_token failed, status: %d", rep.status);
-                    return false;
-                }
-                nlohmann::json j = nlohmann::json::parse(rep.body);
-                img_start_token = j["img_start_token"];
-            }
-            printf("img_start_token: %d\n", img_start_token);
+            // {
+            //     auto ret = cli->Get("/img_start_token");
+            //     auto rep = ret.value();
+            //     if (rep.status != 200)
+            //     {
+            //         ALOGE("get img_start_token failed, status: %d", rep.status);
+            //         return false;
+            //     }
+            //     nlohmann::json j = nlohmann::json::parse(rep.body);
+            //     img_start_token = j["img_start_token"];
+            // }
+            // printf("img_start_token: %d\n", img_start_token);
 
-            {
-                auto ret = cli->Get("/img_context_token");
-                auto rep = ret.value();
-                if (rep.status != 200)
-                {
-                    ALOGE("get img_context_token failed, status: %d", rep.status);
-                    return false;
-                }
-                nlohmann::json j = nlohmann::json::parse(rep.body);
-                img_context_token = j["img_context_token"];
-            }
-            printf("img_context_token: %d\n", img_context_token);
+            // {
+            //     auto ret = cli->Get("/img_context_token");
+            //     auto rep = ret.value();
+            //     if (rep.status != 200)
+            //     {
+            //         ALOGE("get img_context_token failed, status: %d", rep.status);
+            //         return false;
+            //     }
+            //     nlohmann::json j = nlohmann::json::parse(rep.body);
+            //     img_context_token = j["img_context_token"];
+            // }
+            // printf("img_context_token: %d\n", img_context_token);
         }
         catch (const std::exception &e)
         {

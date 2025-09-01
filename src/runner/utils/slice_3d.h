@@ -13,7 +13,7 @@ normalize_slice_index(T index, size_t dim_size);
 
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
-slice_3d_optimized(const std::vector<T>& data_1d,
+slice_3d_optimized(std::vector<T>& data_1d,
                    size_t dim0, size_t dim1, size_t dim2,
                    int start0, int stop0,
                    int start1, int stop1,
@@ -21,19 +21,19 @@ slice_3d_optimized(const std::vector<T>& data_1d,
 
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
-slice_3d_last_dim_from(const std::vector<T>& data_1d,
+slice_3d_last_dim_from(std::vector<T>& data_1d,
                        size_t dim0, size_t dim1, size_t dim2,
                        int start2);
 
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
-slice_3d_last_dim_last_n(const std::vector<T>& data_1d,
+slice_3d_last_dim_last_n(std::vector<T>& data_1d,
                          size_t dim0, size_t dim1, size_t dim2,
                          size_t n);
 
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
-slice_3d_last_dim_range(const std::vector<T>& data_1d,
+slice_3d_last_dim_range(std::vector<T>& data_1d,
                         size_t dim0, size_t dim1, size_t dim2,
                         int start2, int stop2);
 

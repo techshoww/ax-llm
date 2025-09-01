@@ -19,6 +19,7 @@
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
+#include "utils/sampling.hpp"
 
 using SpeechToken = int;
 // The container for speech tokens. std::deque is efficient for front/back operations.
@@ -51,7 +52,7 @@ struct LLMAttrType
 
     int llm_embed_num = 2;
     int llm_embed_size = 896;
-    int speech_embed_num = 6561;
+    int speech_embed_num = 6564;
     int speech_embed_size = 896;
 
     int max_token_len = 127; // auto calc
@@ -65,7 +66,6 @@ struct LLMAttrType
     bool b_use_mmap_load_layer = true;
 
     bool b_use_topk = false;
-    std::string post_config_path = "post_config.json";
 
     // bool b_live_print = true;
     LLMRuningCallback runing_callback = nullptr;
@@ -102,11 +102,11 @@ private:
     int max_len = -1;
 
 
-    int sampling_ids(const std::vector<float32>& weighted_scores,
+    int sampling_ids(const std::vector<float>& weighted_scores,
                      const std::vector<int>& decoded_tokens,
                      int sampling, // Although not used in provided ras_sampling, passed as per original
-                     bool ignore_eos = true,
-                     std::mt19937& gen = std::mt19937{std::random_device{}()}) { // Default gen for convenience/example
+                     bool ignore_eos = true) 
+    {
 
         const int max_trials = 100;
         int num_trials = 0;
@@ -119,8 +119,8 @@ private:
             // Note: weighted_scores is passed by value to avoid modification if ras_sampling modifies its input.
             // If ras_sampling is guaranteed not to modify it, const ref is better.
             top_ids = sampling::ras_sampling(weighted_scores, decoded_tokens,
-                                             0.8, 25, 10, 0.1, // Default RAS params, adjust if needed or passed
-                                             gen); // Pass sampling strategy ID and generator
+                                             0.8, 25, 10, 0.1 // Default RAS params, adjust if needed or passed
+                                            ); 
 
             // Check if the result is acceptable
             // Either ignore_eos is false, or the sampled ID is NOT the EOS token
@@ -165,12 +165,12 @@ public:
         }
         if (!llm_embed_selector.Init(attr.filename_llm_embed, attr.llm_embed_num, attr.llm_embed_size, attr.b_use_mmap_load_embed))
         {
-            ALOGE("embed_selector.Init(%s, %d, %d) failed", attr.filename_llm_embed.c_str(), attr.llm_embed_num, attr.llm_embed_size);
+            ALOGE("llm_embed_selector.Init(%s, %d, %d) failed", attr.filename_llm_embed.c_str(), attr.llm_embed_num, attr.llm_embed_size);
             return false;
         }
         if (!speech_embed_selector.Init(attr.filename_speech_embed, attr.speech_embed_num, attr.speech_embed_size, attr.b_use_mmap_load_embed))
         {
-            ALOGE("embed_selector.Init(%s, %d, %d) failed", attr.filename_tokens_embed.c_str(), attr.speech_embed_num, attr.speech_embed_size);
+            ALOGE("speech_embed_selector.Init(%s, %d, %d) failed", attr.filename_tokens_embed.c_str(), attr.speech_embed_num, attr.speech_embed_size);
             return false;
         }
         update_cqdm(&cqdm, 1, "count", "embed_selector init ok");
@@ -222,7 +222,7 @@ public:
             ALOGE("init post axmodel(%s) failed", attr.filename_post_axmodel.c_str());
             return false;
         }
-        int ret = llm_decoder.init(attr.filename_decoder_axmodel.c_str(), false);
+        ret = llm_decoder.init(attr.filename_decoder_axmodel.c_str(), false);
         if (ret != 0)   
         {
             ALOGE("init llm decoder axmodel(%s) failed", attr.filename_decoder_axmodel.c_str());
@@ -315,7 +315,7 @@ public:
         b_stop = true;
     }
 
-    int Token2Embeds(std::vector<int> & token_ids,  std::vector<unsigned short> token_embeds)
+    int TextToken2Embeds(std::vector<int> &token_ids,  std::vector<unsigned short> &token_embeds)
     {   
         for (size_t i = 0; i < token_ids.size(); i++)
         {
@@ -324,12 +324,23 @@ public:
         return token_embeds.size();
     }
 
-    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>>& position_ids,  std::string text = "What is in the image?", std::vector<unsigned short> & prompt_text_embeds={}, std::vector<unsigned short> &prompt_speech_embeds = {})
+    int SpeechToken2Embeds(std::vector<int> &token_ids,  std::vector<unsigned short> &token_embeds)
+    {   
+        for (size_t i = 0; i < token_ids.size(); i++)
+        {
+            speech_embed_selector.getByIndex(token_ids[i], token_embeds.data() + i * _attr.tokens_embed_size);
+        }
+        return token_embeds.size();
+    }
+
+    int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>>& position_ids,  std::string text, std::vector<unsigned short> & prompt_text_embeds, std::vector<unsigned short> &prompt_speech_embeds)
     {
         // std::vector<int> prompt_ids = tokenizer->Encode(prompt_text, true);
-        std::vector<int> text_ids = tokenizer->Encode(text, true);
+        ImageInfo img_info;
+        img_info.img_prompt = false;
+        std::vector<int> text_ids = tokenizer->Encode(text, img_info);
         int prompt_ids_size = prompt_text_embeds.size()/_attr.tokens_embed_size ;
-        int total_size = prompt_ids_size + text_ids.size() + 2 + prompt_speech_tokens.size();
+        int total_size = prompt_ids_size + text_ids.size() + 2 + prompt_speech_embeds.size()/_attr.speech_embed_size;
         if (total_size > _attr.prefill_max_token_num)
         {
             ALOGE("input embeding size(%d) > prefill_max_token_num(%d)", total_size, _attr.prefill_max_token_num);
@@ -410,7 +421,7 @@ public:
         if (input_embed_num > _attr.prefill_max_token_num)
         {
             ALOGE("input token num(%d) > prefill_max_token_num(%d)", input_embed_num, _attr.prefill_max_token_num);
-            return "";
+            return -1;
         }
 
         int kv_cache_num;
@@ -596,6 +607,7 @@ public:
 
         int next_token = -1;
         t_cqdm cqdm = create_cqdm(_attr.max_token_len, 32);
+        int max_index;
         std::vector<float> scores(0, _attr.speech_embed_num+3);
         {
 
@@ -604,7 +616,6 @@ public:
             // memcpy(input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
             memcpy((void *)input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
             llama_post.inference();
-            int max_index;
             if (_attr.b_use_topk)
             {
                 AX_SYS_MinvalidateCache(llama_post.get_output("indices").phyAddr, llama_post.get_output("indices").pVirAddr, llama_post.get_output("indices").nSize);
@@ -625,7 +636,7 @@ public:
                 auto & input_decoder = llm_decoder.get_input(0);
                 memcpy(input_decoder.pVirAddr,logits.data(), output_post.nSize);
 
-                audo & output_decoder = llm_decoder.get_output(0);
+                auto & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
                 
                 memcpy(scores.data(), post_decoder, (_attr.speech_embed_num+3) * sizeof(float));
@@ -637,7 +648,6 @@ public:
                 llm_finished = true;
                 buffer_cv.notify_all();
                 ALOGI("hit eos, llm finished");
-                b_hit_eos = true;
                 return -1;
             }
 
@@ -741,7 +751,7 @@ public:
                 auto & input_decoder = llm_decoder.get_input(0);
                 memcpy(input_decoder.pVirAddr, logits.data(), output_post.nSize);
 
-                audo & output_decoder = llm_decoder.get_output(0);
+                auto & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
                 
                 memcpy(scores.data(), post_decoder, (_attr.speech_embed_num+3) * sizeof(float));

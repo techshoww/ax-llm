@@ -65,7 +65,7 @@ int multinomial_sample(const std::vector<float>& probabilities, std::mt19937& ge
 // top_k: maximum number of top tokens to consider
 // gen: random number generator reference
 // Returns the sampled token ID (index)
-int nucleus_sampling(std::vector<float> weighted_scores, float top_p = 0.8, int top_k = 25, std::mt19937& gen) {
+int nucleus_sampling(std::vector<float> weighted_scores, float top_p, int top_k, std::mt19937& gen) {
     if (weighted_scores.empty()) {
         return -1; // Or handle error appropriately
     }
@@ -162,9 +162,10 @@ int random_sampling(std::vector<float> weighted_scores, std::mt19937& gen) {
 int ras_sampling(std::vector<float> weighted_scores,
                  const std::vector<int>& decoded_tokens,
                  float top_p = 0.8, int top_k = 25,
-                 int win_size = 10, float tau_r = 0.1,
-                 std::mt19937& gen = std::mt19937{std::random_device{}()}) { // Default gen for convenience
+                 int win_size = 10, float tau_r = 0.1 ) { // Default gen for convenience
 
+    std::random_device rd;
+    std::mt19937 gen(rd()); // Create the generator once
     // Step 1: Get candidate from nucleus sampling
     int top_ids = nucleus_sampling(weighted_scores, top_p, top_k, gen);
 

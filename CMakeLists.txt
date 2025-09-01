@@ -70,6 +70,7 @@ function(build_exec name main_source)
                     src/runner/utils/files.cpp 
                     src/runner/utils/image_processor.cpp 
                     src/runner/utils/mrope.cpp
+                    src/runner/utils/slice_3d.tpp
                     )
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)

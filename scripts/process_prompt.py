@@ -1,5 +1,7 @@
 import argparse
+import torch
 import torchaudio
+import numpy as np
 from frontend import CosyVoiceFrontEnd
 
 def load_wav(wav, target_sr):
@@ -32,4 +34,26 @@ if __name__ == "__main__":
 
     prompt_speech_16k = load_wav(args.prompt_speech, 16000)
     model_input = frontend.frontend_zero_shot(args.tts_text, args.prompt_text, prompt_speech_16k, args.sample_rate, args.zero_shot_spk_id)
-    print(model_input)
+    
+    # model_input = {'prompt_text': prompt_text_token, 'prompt_text_len': prompt_text_token_len,
+    #                        'llm_prompt_speech_token': speech_token, 'llm_prompt_speech_token_len': speech_token_len,
+    #                        'flow_prompt_speech_token': speech_token, 'flow_prompt_speech_token_len': speech_token_len,
+    #                        'prompt_speech_feat': speech_feat, 'prompt_speech_feat_len': speech_feat_len,
+    #                        'llm_embedding': embedding, 'flow_embedding': embedding}
+    
+    for k, v in model_input.items():
+        if "_len" in k:
+            continue
+        shapes = [str(s) for s in v.shape]
+        shape_str = "_".join(shapes)
+        if v.dtype in (torch.int32, torch.int64):
+            np.savetxt(f"{k}_{shape_str}.txt", v.detach().cpu().numpy().reshape(-1), fmt="%d", delimiter=",")
+        else:
+            np.savetxt(f"{k}_{shape_str}.txt", v.detach().cpu().numpy().reshape(-1), delimiter=",")
+
+
+    rand_noise = torch.randn([1, 80,  300])
+    np.savetxt("rand_noise_1_80_300.txt", rand_noise.numpy().reshape(-1), delimiter=",")
+
+    speech_window = np.hamming(2 * 8 * 480)
+    np.savetxt("speech_window_2x8x480.txt", speech_window.reshape(-1), delimiter=",")

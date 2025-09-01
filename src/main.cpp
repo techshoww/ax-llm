@@ -10,7 +10,7 @@
 #include <opencv2/opencv.hpp>
 #include "signal.h"
 #include "runner/LLM.hpp"
-#include "runner/Token2wav.hpp
+#include "runner/Token2wav.hpp"
 #include "runner/utils/slice_3d.h"
 #include "runner/utils/wav.hpp"
 #include "cmdline.hpp"
@@ -45,12 +45,12 @@ void __sigExit(int iSigNo)
 int tts(
     // for llm
     std::string & text,
-    std::vector<int> prompt_text_embeds,
+    std::vector<unsigned short> prompt_text_embeds,
     std::vector<unsigned short> prompt_speech_embeds,
     // for flow
-    std::vector<float32> prompt_feat,
-    std::vector<float32> prompt_speech_embeds_flow,
-    std::vector<float32> spk_embeds
+    std::vector<float> prompt_feat,
+    std::vector<float> prompt_speech_embeds_flow,
+    std::vector<float> spk_embeds
 )
 {
     std::vector <float> output;
@@ -66,23 +66,23 @@ int tts(
         std::thread llm_thread(llm_thread_func);
 
         int token_offset = 0;
-        int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2wav.flow_embed_size;
-        int prompt_token_align_len = int(prompt_token_len / lToken2wav.token_hop_len) * lToken2wav.token_hop_len;
-        auto prompt_speech_embeds_flow1 = slice_3d_last_dim_from<T>(prompt_speech_embeds_flow, 1, 1, prompt_speech_embeds_flow.size(), prompt_token_align_len * lToken2wav.flow_embed_size);
-        auto prompt_feat1 = slice_3d_last_dim_from<T>(prompt_feat, 1, 1, prompt_feat.size(), prompt_token_align_len * 80 * 2);
+        int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2Wav.flow_embed_size;
+        int prompt_token_align_len = int(prompt_token_len / lToken2Wav.token_hop_len) * lToken2Wav.token_hop_len;
+        auto prompt_speech_embeds_flow1 = slice_3d_last_dim_from<float>(prompt_speech_embeds_flow, 1, 1, prompt_speech_embeds_flow.size(), prompt_token_align_len * lToken2Wav.flow_embed_size);
+        auto prompt_feat1 = slice_3d_last_dim_from<float>(prompt_feat, 1, 1, prompt_feat.size(), prompt_token_align_len * 80 * 2);
 
         int promot_token_pad = 0;
         int this_token_hop_len;
         int i=0;
         while (true) {
             // std::this_thread::sleep_for(std::chrono::duration<double>(0.1));
-            this_token_hop_len = (token_offset == 0)? lToken2wav.token_hop_len + promot_token_pad : lToken2wav.token_hop_len;
+            this_token_hop_len = (token_offset == 0)? lToken2Wav.token_hop_len + promot_token_pad : lToken2Wav.token_hop_len;
 
             std::unique_lock<std::mutex> lock(g_buffer_mutex);
 
             // Wait until there are enough tokens OR LLM has finished
             // The lambda is the predicate that must be true for wait to stop waiting.
-            g_buffer_cv.wait(lock, [] {
+            g_buffer_cv.wait(lock, [&] {
                 return (g_token_buffer.size() - token_offset >= this_token_hop_len + lToken2Wav.pre_lookahead_len) || \
                         g_llm_finished.load() ;
             });
@@ -105,7 +105,7 @@ int tts(
                 // --- Simulate Token2Wav Processing ---
                 std::cout << "[Main/Token2Wav Thread] Processing batch of " << token.size() << " tokens...\n";
               
-                audo speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset, false);
+                auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset, false);
                 token_offset += this_token_hop_len;
 
                 //TODO: 另起一个线程处理生成的音频
@@ -116,7 +116,7 @@ int tts(
 
             } 
             
-            elif (g_llm_finished.load() ) {
+            else if (g_llm_finished.load() ) {
                 std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
                 lock.unlock();
                 break;
@@ -165,16 +165,19 @@ int main(int argc, char *argv[])
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, __sigExit);
     LLMAttrType attr;
-    std::string text;
+    std::string text = "君不见黄河之水天上来，奔流到海不复回。君不见高堂明镜悲白发，朝如青丝暮成雪。";
     bool b_continue = true;
 
     cmdline::parser cmd;
-    // cmd.add<std::string>("prompt", 'p', "prompt", true, prompt);
-    // cmd.add<std::string>("image", 'i', "single image file or .txt file for images list", true);
+    cmd.add<std::string>("text", 't', "text", true, text);
+    cmd.add<std::string>("token2wav_axmodel_dir", 0, "token2wav axmodel path template", false, "");
     cmd.add<std::string>("template_filename_axmodel", 0, "axmodel path template", false, attr.template_filename_axmodel);
     cmd.add<std::string>("filename_post_axmodel", 0, "post axmodel path", false, attr.filename_post_axmodel);
+    cmd.add<std::string>("filename_decoder_axmodel", 0, "post axmodel path", false, attr.filename_decoder_axmodel);
     cmd.add<std::string>("filename_tokenizer_model", 0, "tokenizer model path", false, attr.filename_tokenizer_model);
     cmd.add<std::string>("filename_tokens_embed", 0, "tokens embed path", false, attr.filename_tokens_embed);
+    cmd.add<std::string>("filename_llm_embed", 0, "tokens embed path", false, attr.filename_llm_embed);
+    cmd.add<std::string>("filename_speech_embed", 0, "tokens embed path", false, attr.filename_speech_embed);
     
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
@@ -189,16 +192,18 @@ int main(int argc, char *argv[])
 
     // cmd.add<bool>("live_print", 0, "print in live if set true, else print in end", false);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
-    cmd.add<std::string>("post_config_path", 0, "post config path", false, attr.post_config_path);
 
     cmd.parse_check(argc, argv);
 
-    // prompt = cmd.get<std::string>("prompt");
+    text = cmd.get<std::string>("text");
     // auto image_prompt = cmd.get<std::string>("image");
     // attr.tokenizer_type = (TokenizerType)cmd.get<int>("tokenizer_type");
     attr.filename_tokenizer_model = cmd.get<std::string>("filename_tokenizer_model");
     attr.filename_tokens_embed = cmd.get<std::string>("filename_tokens_embed");
+    attr.filename_llm_embed = cmd.get<std::string>("filename_llm_embed");
+    attr.filename_speech_embed = cmd.get<std::string>("filename_speech_embed");
     attr.filename_post_axmodel = cmd.get<std::string>("filename_post_axmodel");
+    attr.filename_decoder_axmodel = cmd.get<std::string>("filename_decoder_axmodel");
     attr.template_filename_axmodel = cmd.get<std::string>("template_filename_axmodel");
     // attr.template_prefill_filename_axmodel = cmd.get<std::string>("template_prefill_filename_axmodel");
     // attr.prefill_axmodel_num = cmd.get<int>("prefill_axmodel_num");
@@ -207,12 +212,12 @@ int main(int argc, char *argv[])
     attr.b_eos = cmd.get<bool>("eos");
     // attr.b_use_topk = cmd.get<bool>("use_topk");
     attr.axmodel_num = cmd.get<int>("axmodel_num");
+    std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
     // attr.tokens_embed_num = cmd.get<int>("tokens_embed_num");
     // attr.tokens_embed_size = cmd.get<int>("tokens_embed_size");
 
     // attr.b_use_mmap_load_embed = cmd.get<bool>("use_mmap_load_embed");
     // attr.b_dynamic_load_axmodel_layer = cmd.get<bool>("dynamic_load_axmodel_layer");
-    attr.post_config_path = cmd.get<std::string>("post_config_path");
 
     // bool b_live_print = cmd.get<bool>("live_print");
     // if (b_live_print)
@@ -228,21 +233,37 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!lToken2Wav.Init("../model_convert/token2wav-axmodels/"))
+    if (!lToken2Wav.Init(token2wav_axmodel_dir))
     {
         return -1;
     }
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
+    std::vector<int> prompt_speech_token;
     std::vector<unsigned short> prompt_speech_embeds;
 
     // for flow
-    std::vector<float32> prompt_feat;
-    std::vector<float32> prompt_speech_embeds_flow;
-    std::vector<float32> spk_embeds;
+    std::vector<float> prompt_feat;
+    std::vector<float> prompt_speech_embeds_flow;
+    std::vector<float> spk_embeds;
 
-    lLaMa.Token2Embeds(prompt_text_token, prompt_text_embeds);
+    readtxt("prompt_text_1_15.txt", prompt_text_token);
+    readtxt("llm_prompt_speech_token_1_87.txt", prompt_speech_token);
+    readtxt("prompt_speech_feat_1_174_80.txt", prompt_feat);
+    readtxt("flow_embedding_1_192.txt", spk_embeds);    
+
+    lLaMa.TextToken2Embeds(prompt_text_token, prompt_text_embeds);
+    lLaMa.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds);
+
+    lToken2Wav.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds_flow);
+
+    tts(
+            // for llm
+            text, prompt_text_embeds,prompt_speech_embeds,
+            // for flow
+            prompt_feat, prompt_speech_embeds_flow, spk_embeds
+        );
 
     //
     if (b_continue)
