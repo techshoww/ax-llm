@@ -89,10 +89,7 @@ class Request(BaseHTTPRequestHandler):
             req = json.loads(data)
             prompt = req['text']
 
-            template = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n用中文回答问题<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"
-            print(template)
-
-            token_ids = tokenizer.encode(template)
+            token_ids = tokenizer.encode(prompt)
             if token_ids is None:
                 msg = json.dumps({'token_ids': -1})
             else:

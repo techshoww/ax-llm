@@ -25,7 +25,7 @@ TokenBuffer g_token_buffer;              // Shared buffer for tokens
 std::mutex g_buffer_mutex;               // Mutex to protect the buffer
 std::condition_variable g_buffer_cv;     // Condition variable for waiting/notifying
 std::atomic<bool> g_llm_finished{false}; // Flag to signal LLM completion
-
+std::atomic<bool> g_stop{false}; 
 // --- Constants ---
 const size_t MAX_BUFFER_SIZE = 100;     // Optional: Limit buffer size to prevent unbounded growth
 
@@ -33,6 +33,7 @@ const size_t MAX_BUFFER_SIZE = 100;     // Optional: Limit buffer size to preven
 void __sigExit(int iSigNo)
 {
     lLaMa.Stop();
+    g_stop = true;
     return;
 }
 
@@ -92,14 +93,18 @@ int tts(
             // The lambda is the predicate that must be true for wait to stop waiting.
             g_buffer_cv.wait(lock, [&] {
                 return (g_token_buffer.size() - token_offset >= this_token_hop_len + lToken2Wav.pre_lookahead_len) || \
-                        g_llm_finished.load() ;
+                        g_llm_finished.load() ||\
+                        g_stop.load();
             });
 
-            ALOGI("token2wav proc");
+            if(g_stop)
+            {
+                lock.unlock();
+                break;
+            }
             // Check if we should process based on threshold or if LLM is finished
-            if (g_token_buffer.size() >= this_token_hop_len + lToken2Wav.pre_lookahead_len ) {
+            else if (g_token_buffer.size() >= this_token_hop_len + lToken2Wav.pre_lookahead_len ) {
                 
-                ALOGI("token2wav proc");
                 // Extract tokens to process
                 std::vector<SpeechToken> token;
                 int start = token_offset -  std::min( int(token_offset / lToken2Wav.token_hop_len), lToken2Wav.max_infer_chunk_num-1) * lToken2Wav.token_hop_len;
@@ -147,6 +152,12 @@ int tts(
         // Wait for the LLM thread to finish
         if (llm_thread.joinable()) {
             llm_thread.join();
+        }
+
+        if(g_stop)
+        {
+            g_token_buffer.erase(g_token_buffer.begin(), g_token_buffer.end());
+            return 1;
         }
 
         std::vector<SpeechToken> token;
@@ -263,6 +274,11 @@ int main(int argc, char *argv[])
 
     while (b_continue)
     {
+        if(g_stop)
+        {
+            break;
+        }
+        
         printf("text >> ");
         fflush(stdout);
         std::getline(std::cin, text);

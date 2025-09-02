@@ -295,6 +295,7 @@ public:
     {
         ax_runner_ax650 * model;
         int len = mel.size()/(80);
+        ALOGI("len %d", len);
         if(len == 50 && cache_source.empty())
         { 
             model = &hift_50_first;
@@ -311,7 +312,7 @@ public:
         memcpy(p, mel.data(), mel.size() * sizeof(float));
         if(!cache_source.empty())
         {
-            p = model->get_input("cache_source").pVirAddr;
+            p = model->get_input("hift_cache_source").pVirAddr;
             memcpy(p, cache_source.data(), cache_source.size() * sizeof(float));
         }
 
@@ -544,13 +545,15 @@ public:
         {
             auto hift_cache_mel = hift_cache_dict["mel"];
             hift_cache_source = hift_cache_dict["source"];
+            ALOGI("tts_mel size %d", tts_mel.size());
+            ALOGI("hift_cache_mel size %d", hift_cache_mel.size());
             tts_mel1 = concat_3d_dim2<float>(hift_cache_mel, 1, 80, hift_cache_mel.size()/80, tts_mel, 1, 80, tts_mel.size()/80);
-            ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
+            ALOGI("tts_mel1 size %d", tts_mel1.size());
         }
         else{
-            ret = infer_hift(tts_mel, hift_cache_source, speech, source);
+            tts_mel1 = tts_mel;
         }   
-
+        ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
         
         if(ret != 0){
             ALOGE("failed");
