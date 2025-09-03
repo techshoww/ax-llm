@@ -7,3 +7,7 @@ tools/test.cpp
 qtproj/LLM-Chat/CMakeLists.txt.user
 third_party
 *.txt
+__pycache__/
+*.wav
+*.mp4
+*.mp3

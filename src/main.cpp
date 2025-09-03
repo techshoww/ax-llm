@@ -37,11 +37,52 @@ void __sigExit(int iSigNo)
     return;
 }
 
-// void llm_running_callback(int *p_token, int n_token, const char *p_str, float token_per_sec, void *reserve)
-// {
-//     fprintf(stdout, "%s", p_str);
-//     fflush(stdout);
-// }
+void simulate_llm() {
+    std::vector<int> tokens;
+    readtxt("../../model_convert/llm_out_tokens.txt", tokens);
+
+    std::cout << "[LLM Thread] Starting to generate tokens...\n";
+
+    // Simulate generating a stream of tokens
+    for (int& token : tokens)
+    {
+        // Simulate time taken to generate a token
+        // std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+        {
+            // Acquire lock before modifying the shared buffer
+            std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+            // Optional: Backpressure - wait if buffer is full
+            // This prevents the LLM from running too far ahead.
+            // g_buffer_cv.wait(lock, [] { return g_token_buffer.size() < MAX_BUFFER_SIZE; });
+
+            // Add the generated token(s) to the buffer
+            g_token_buffer.push_back(token); // Add one token
+            // Or add a batch: for(...) g_token_buffer.push_back(...);
+
+            std::cout << "[LLM Thread] Generated token " << g_token_buffer.back()
+                      << " (Buffer size: " << g_token_buffer.size() << ")\n";
+        } // Lock is automatically released here
+
+        // Notify the consumer (token2wav) that new data might be available
+        g_buffer_cv.notify_one();
+    }
+
+    // Signal that LLM generation is finished
+    g_llm_finished = true;
+    std::cout << "[LLM Thread] Finished generating tokens.\n";
+
+    // Final notify to wake up the consumer if it's waiting
+    g_buffer_cv.notify_all();
+}
+
+void reset()
+{
+    g_llm_finished = false;
+    g_token_buffer.erase(g_token_buffer.begin(), g_token_buffer.end());
+    lToken2Wav.reset();
+}
 
 int tts(
     // for llm
@@ -69,16 +110,12 @@ int tts(
         int token_offset = 0;
         int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2Wav.flow_embed_size;
         int prompt_token_align_len = int(prompt_token_len / lToken2Wav.token_hop_len) * lToken2Wav.token_hop_len;
-        ALOGI("prompt_token_len %d prompt_token_align_len %d",prompt_token_len, prompt_token_align_len);
-        // auto prompt_speech_embeds_flow1 = slice_3d_last_dim_from<float>(prompt_speech_embeds_flow, 1, 1, prompt_speech_embeds_flow.size(), prompt_token_align_len * lToken2Wav.flow_embed_size);
+
         std::vector<float> prompt_speech_embeds_flow1;
-        // memcpy(prompt_speech_embeds_flow1.data(), prompt_speech_embeds_flow.data(), prompt_speech_embeds_flow1.size()*sizeof(float));
         prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin()+prompt_token_align_len * 512);
-        // auto prompt_feat1 = slice_3d_last_dim_from<float>(prompt_feat, 1, 1, prompt_feat.size(), prompt_token_align_len * 80 * 2);
-        ALOGI("prompt_feat size %d", prompt_feat.size());
+        
         std::vector<float> prompt_feat1;
         prompt_feat1.insert(prompt_feat1.begin(), prompt_feat.begin(), prompt_feat.begin()+prompt_token_align_len*2*80);
-        ALOGI("prompt_feat size %d", prompt_feat1.size());
 
         int promot_token_pad = 0;
         int this_token_hop_len;
@@ -103,15 +140,13 @@ int tts(
                 break;
             }
             // Check if we should process based on threshold or if LLM is finished
-            else if (g_token_buffer.size() >= this_token_hop_len + lToken2Wav.pre_lookahead_len ) {
+            else if (g_token_buffer.size() - token_offset >= this_token_hop_len + lToken2Wav.pre_lookahead_len ) {
                 
                 // Extract tokens to process
                 std::vector<SpeechToken> token;
                 int start = token_offset -  std::min( int(token_offset / lToken2Wav.token_hop_len), lToken2Wav.max_infer_chunk_num-1) * lToken2Wav.token_hop_len;
                 int end = token_offset + this_token_hop_len + lToken2Wav.pre_lookahead_len;
-                ALOGI("token_offset %d, this_token_hop_len:%dm pre_lookahead_len:%d", token_offset , this_token_hop_len , lToken2Wav.pre_lookahead_len);
-                ALOGI("start:%d, end:%d, g_token_buffer.size():%d",start, end,g_token_buffer.size());
-                // std::copy(g_token_buffer.begin() + start, g_token_buffer.begin() + end, token.begin());
+                
                 token.insert(token.end(), g_token_buffer.begin()+start, g_token_buffer.begin()+end);
                 // --- End of Critical Section ---
 
@@ -120,19 +155,19 @@ int tts(
 
                 // --- Simulate Token2Wav Processing ---
                 std::cout << "[Main/Token2Wav Thread] Processing batch of " << token.size() << " tokens...\n";
-                ALOGI("token size:%d", token.size());
+
                 auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset, false);
                 token_offset += this_token_hop_len;
 
                 //TODO: 另起一个线程处理生成的音频
                 output.insert(output.end(), speech.begin(), speech.end());
                 std::string path = "output_"+std::to_string(i)+".wav";
-                ALOGI("speech size:%d", speech.size());
+                
                 saveVectorAsWavFloat(speech, path, 24000, 1);
                 i += 1;
 
             } 
-            
+
             else if (g_llm_finished.load() ) {
                 std::cout << "[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.\n";
                 lock.unlock();
@@ -162,7 +197,7 @@ int tts(
 
         std::vector<SpeechToken> token;
         int start = g_token_buffer.size() - std::min( int(g_token_buffer.size() / lToken2Wav.token_hop_len), lToken2Wav.max_infer_chunk_num-1) * lToken2Wav.token_hop_len;
-        std::copy(g_token_buffer.begin() + start, g_token_buffer.end(), token.begin());
+        token.insert(token.end(), g_token_buffer.begin() + start, g_token_buffer.end());
         auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset - start, true);
         //TODO: 另起一个线程处理生成的音频
         output.insert(output.end(), speech.begin(), speech.end());
@@ -170,7 +205,7 @@ int tts(
         saveVectorAsWavFloat(speech, path, 24000, 1);
         saveVectorAsWavFloat(output, "output.wav", 24000, 1);
 
-        g_token_buffer.erase(g_token_buffer.begin(), g_token_buffer.end());
+        reset();
         std::cout << "\nVoice generation pipeline completed.\n";
 
     } catch (const std::exception& e) {
@@ -180,7 +215,6 @@ int tts(
 
     return 0;
 }
-
 
 
 int main(int argc, char *argv[])
@@ -247,26 +281,26 @@ int main(int argc, char *argv[])
     std::vector<float> prompt_feat;
     std::vector<float> prompt_speech_embeds_flow;
     std::vector<float> spk_embeds;
-    ALOGI();
+    
     readtxt("prompt_text_1_15.txt", prompt_text_token);
     readtxt("llm_prompt_speech_token_1_87.txt", prompt_speech_token);
     readtxt("prompt_speech_feat_1_174_80.txt", prompt_feat);
-    readtxt("flow_embedding_1_192.txt", spk_embeds);    
-    ALOGI("prompt_text_token.size:%d",prompt_text_token.size());
+    readtxt<float>("flow_embedding_1_192.txt", spk_embeds);    
+    
     lLaMa.TextToken2Embeds(prompt_text_token, prompt_text_embeds);
-    ALOGI("prompt_speech_token.size:%d",prompt_speech_token.size());
     lLaMa.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds);
-    ALOGI("prompt_speech_token.size:%d",prompt_speech_token.size());
     lToken2Wav.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds_flow);
-    ALOGI();
-    tts(
+
+    if(text.size()>0)
+    {
+        tts(
             // for llm
             text, prompt_text_embeds,prompt_speech_embeds,
             // for flow
             prompt_feat, prompt_speech_embeds_flow, spk_embeds
         );
-    ALOGI();
-    //
+    }
+    
     if (b_continue)
     {
         printf("Type \"q\" to exit, Ctrl+c to stop current running\n");

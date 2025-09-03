@@ -82,9 +82,9 @@ public:
             return false;
         }
 
-        if (!flow_embed_selector.Init((model_dir+"/flow.input_embedding.float16.bin").c_str(), flow_embed_num, flow_embed_size, false))
+        if (!flow_embed_selector.Init("../../model_convert/flow.input_embedding.float16.bin", flow_embed_num, flow_embed_size, false))
         {
-            ALOGE("flow_embed_selector.Init(%s, %d, %d) failed", (model_dir+"/flow.input_embedding.float16.bin").c_str(),flow_embed_num, flow_embed_size);
+            ALOGE("flow_embed_selector.Init(%s, %d, %d) failed", "../../model_convert/flow.input_embedding.float16.bin",flow_embed_num, flow_embed_size);
             return false;
         }
 
@@ -151,6 +151,7 @@ public:
             return false;
         }
 
+        ALOGI("Token2Wav init ok");
         return true;
     }
 
@@ -174,13 +175,13 @@ public:
         {
             token_embeds.resize(token_ids.size()* flow_embed_size);
         }
-        std::vector<unsigned short> speech_embeds_one;
+        std::vector<unsigned short> speech_embeds_one(flow_embed_size);
         for (size_t i = 0; i < token_ids.size(); i++)
         {
-            flow_embed_selector.getByIndex(token_ids[i], speech_embeds_one);
+            flow_embed_selector.getByIndex(token_ids[i], speech_embeds_one.data());
             for (int j = 0; j < flow_embed_size; j++)
                 {
-                    unsigned int proc = speech_embeds_one[i] << 16;
+                    unsigned int proc = speech_embeds_one[j] << 16;
                     token_embeds[i * flow_embed_size + j] = *reinterpret_cast<float *>(&proc);
                 }
         }
@@ -295,7 +296,7 @@ public:
     {
         ax_runner_ax650 * model;
         int len = mel.size()/(80);
-        ALOGI("len %d", len);
+        
         if(len == 50 && cache_source.empty())
         { 
             model = &hift_50_first;
@@ -393,7 +394,6 @@ public:
                     mel.resize(x.size());
                 }
                 memcpy(mel.data(), x.data(), x.size() * sizeof(float));
-                ALOGI("mel size %d", mel.size());
             }
 
         }
@@ -430,9 +430,8 @@ public:
         }
 
         len = mu.size()/80;
-        ALOGI("len %d", len);
-        std::vector<float> mask(len, 1.0);
 
+        std::vector<float> mask(len, 1.0);
         std::vector<float> all_mel;
         
         ret = infer_flow_decoder(mu, spks, cond, mask, all_mel);
@@ -440,15 +439,13 @@ public:
         {
             return std::vector<float>{};
         }
-        ALOGI("all_mel size %d",all_mel.size());
-        ALOGI("prompt_feat size %d",prompt_feat.size());
+        
         int len_mel1 = prompt_feat.size()/80;
         int len_mel2 = all_mel.size()/80 - len_mel1;
-        ALOGI("len mel1, len mel2 %d %d", len_mel1, len_mel2);
+        
         std::vector<float> mel(len_mel2 * 80, 0);
-        // memcpy(mel.data(), all_mel.data() + len_mel1 * 80, 80 * len_mel2 * sizeof(float));
         auto result = slice_3d_last_dim_from<float>(all_mel, 1, 80, all_mel.size()/80, len_mel1);
-        ALOGI("result size:%d", result.size());
+        
         return result;
     }
 
@@ -499,6 +496,10 @@ public:
         // fade_in_mel_data is now modified in-place with the faded result.
     }
 
+    void reset()
+    {
+        std::unordered_map<std::string, std::vector<float>>().swap(hift_cache_dict);
+    }
 
     std::vector<float> infer(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> & prompt_feat,  
                 std::vector<float> & spk_embeds, int token_offset, bool finalize)
@@ -515,7 +516,7 @@ public:
 
             for (int j = 0; j < flow_embed_size; j++)
                 {
-                    unsigned int proc = speech_embeds_one[i] << 16;
+                    unsigned int proc = speech_embeds_one[j] << 16;
                     speech_embeds[prompt_speech_embeds.size() + i * flow_embed_size + j] = *reinterpret_cast<float *>(&proc);
                 }
         }
@@ -534,10 +535,9 @@ public:
         else{
             start = std::min( int(token_offset / token_hop_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
         }
-        ALOGI("token_offset:%d",token_offset);
-        ALOGI("mel size:%d, start:%d", mel.size(), start);
+        
         tts_mel = slice_3d_last_dim_from<float>(mel, 1, 80, mel.size()/80, start);
-        ALOGI("tts_mel size:%d, start:%d", tts_mel.size(), start);
+        
         std::vector<float> hift_cache_source;
         std::vector<float> tts_mel1;
         std::vector<float> speech, source, tts_speech;
@@ -545,10 +545,7 @@ public:
         {
             auto hift_cache_mel = hift_cache_dict["mel"];
             hift_cache_source = hift_cache_dict["source"];
-            ALOGI("tts_mel size %d", tts_mel.size());
-            ALOGI("hift_cache_mel size %d", hift_cache_mel.size());
             tts_mel1 = concat_3d_dim2<float>(hift_cache_mel, 1, 80, hift_cache_mel.size()/80, tts_mel, 1, 80, tts_mel.size()/80);
-            ALOGI("tts_mel1 size %d", tts_mel1.size());
         }
         else{
             tts_mel1 = tts_mel;
@@ -572,10 +569,12 @@ public:
             hift_cache_dict["source"] = slice_3d_last_dim_from<float>(source, 1, 1, source.size(), -source_cache_len);
             hift_cache_dict["speech"] = slice_3d_last_dim_from<float>(speech, 1, 1, speech.size(), -source_cache_len);  // speech 是 2d 的，可以用3d函数按照 dim0 ==1 处理
 
-            tts_speech = slice_3d_last_dim_last_n(speech, 1, 1, speech.size(), source_cache_len);
+            // tts_speech = slice_3d_last_dim_last_n(speech, 1, 1, speech.size(), -source_cache_len);
+            tts_speech.resize(speech.size()-source_cache_len);
+            memcpy(tts_speech.data(), speech.data(), (speech.size()-source_cache_len)*sizeof(float));
+
         }
         else{
-            ALOGI("neg_offset：%d", neg_offset);
             tts_speech = slice_3d_last_dim_from<float>(speech, 1, 1, speech.size(), neg_offset*480);
 
             if(!hift_cache_dict.empty())

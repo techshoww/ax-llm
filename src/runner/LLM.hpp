@@ -102,49 +102,6 @@ private:
     int min_len = -1;
     int max_len = -1;
 
-
-    int sampling_ids(const std::vector<float>& weighted_scores,
-                     const std::vector<int>& decoded_tokens,
-                     int sampling, // Although not used in provided ras_sampling, passed as per original
-                     bool ignore_eos = true) 
-    {
-
-        const int max_trials = 100;
-        int num_trials = 0;
-        int top_ids = -1; // Initialize
-
-        while (true) {
-            // Call the RAS sampling function
-            // Pass the 'sampling' parameter even if ras_sampling doesn't use it directly,
-            // assuming it might be needed for other sampling methods or future changes.
-            // Note: weighted_scores is passed by value to avoid modification if ras_sampling modifies its input.
-            // If ras_sampling is guaranteed not to modify it, const ref is better.
-            top_ids = sampling::ras_sampling(weighted_scores, decoded_tokens,
-                                             0.8, 25, 10, 0.1 // Default RAS params, adjust if needed or passed
-                                            ); 
-
-            // Check if the result is acceptable
-            // Either ignore_eos is false, or the sampled ID is NOT the EOS token
-            if (!ignore_eos || (top_ids != _attr.speech_embed_num-3)) {
-                break; // Accept the sample, exit loop
-            }
-
-            // If we reach here, ignore_eos is true AND top_ids is the EOS token
-            // Increment trial counter and check limit
-            num_trials++;
-            if (num_trials > max_trials) {
-                throw std::runtime_error(
-                    "sampling reached max_trials " + std::to_string(max_trials) +
-                    " and still got eos when ignore_eos is True, check your input!"
-                );
-            }
-            // Loop continues if limit not reached
-        }
-
-        return top_ids; // Return the finally accepted token ID
-    }
-
-
 public:
     bool Init(LLMAttrType attr)
     {
@@ -534,15 +491,12 @@ public:
                         }
                     }
                 }    
-                // axcl_Memcpy((void *)input_indices.phyAddr, input_indices_ptr, input_indices.nSize, AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
 
                 // set mask
                 auto &input_mask = layer.layer.get_input(_attr.prefill_grpid, "mask");
-                // axcl_Memcpy((void *)input_mask.phyAddr, (void *)mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short), AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
                 memcpy((void *)input_mask.pVirAddr, (void *)mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short));
                 // set input
                 auto &input_input = layer.layer.get_input(_attr.prefill_grpid, "input");
-                // axcl_Memcpy((void *)input_input.phyAddr, embed_tmp.data(), embed_tmp.size() * sizeof(unsigned short), AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
                 memcpy((void *)input_input.pVirAddr, embed_tmp.data(), embed_tmp.size() * sizeof(unsigned short));
 
                 layer.layer.inference(_attr.prefill_grpid);
@@ -605,7 +559,6 @@ public:
 
             // post process
             auto &input = llama_post.get_input(0);
-            // memcpy(input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
             memcpy((void *)input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
             llama_post.inference();
             if (_attr.b_use_topk)
@@ -623,18 +576,16 @@ public:
                     unsigned int proc = post_out[i] << 16;
                     logits[i] = *reinterpret_cast<float *>(&proc);
                 }
-                savetxt<float>("logits.txt", logits, '\n');
+                
                 auto & input_decoder = llm_decoder.get_input(0);
                 memcpy(input_decoder.pVirAddr, logits.data(), logits.size()*sizeof(float));
                 llm_decoder.inference();
 
                 auto & output_decoder = llm_decoder.get_output(0);
                 float *post_decoder = (float *)output_decoder.pVirAddr;
-                ALOGI("output_decoder.nSize %d", output_decoder.nSize);
 
                 memcpy(scores.data(), post_decoder, output_decoder.nSize);
-                savetxt<float>("scores_0.txt", scores, '\n');
-                max_index = sampling_ids(scores, cached_token, 25, true);
+                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_embed_num-3, true);
             }
             next_token = max_index;
             
@@ -652,14 +603,14 @@ public:
                 token_buffer.push_back(max_index);
             }
             buffer_cv.notify_one();
-            ALOGI("token_buffer push %d", max_index);
+            // ALOGI("token_buffer push %d", max_index);
             ALOGI("ttft: %.2f ms", ttft_timer.cost());
         }
         t_cost.start();
 
         bool b_hit_eos = false;
 
-        for (unsigned int indices = max_pos_id+1; indices < max_len; indices++)
+        for (unsigned int indices = max_pos_id+1; indices - max_pos_id < max_len; indices++)
         {
             if (b_stop)
             {
@@ -668,7 +619,6 @@ public:
 
             speech_embed_selector.getByIndex(next_token, embed.data());
             memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").pVirAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize);
-            // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
 
             {
                 std::vector<float> float_embeds(embed.size());
@@ -677,7 +627,6 @@ public:
                     unsigned int proc = embed[i] << 16;
                     float_embeds[i] = *reinterpret_cast<float *>(&proc);
                 }
-                savetxt<float>(std::string("prefill_speech-embeds")+std::to_string(indices-max_pos_id-1)+std::string(".txt"), float_embeds, '\n');
             }
 
             for (int m = 0; m < _attr.axmodel_num; m++)
@@ -706,9 +655,6 @@ public:
                     }
                 }
 
-                // auto &input_input = layer.layer.get_input(decode_grpid, "input");
-                // memcpy((void *)input_input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
-
                 auto &input_k_cache = layer.layer.get_input(decode_grpid, "K_cache");
                 auto &input_v_cache = layer.layer.get_input(decode_grpid, "V_cache");
 
@@ -736,15 +682,13 @@ public:
                     memcpy((void *)llama_layers[m + 1].layer.get_input(decode_grpid, "input").pVirAddr,
                            (void *)layer.layer.get_output(decode_grpid, "output").pVirAddr, layer.layer.get_input(decode_grpid, "input").nSize);
                 }
-                // ALOGI("%f %f %f %f %f", bfloat16(embed[0]).fp32(), bfloat16(embed[1]).fp32(), bfloat16(embed[2]).fp32(), bfloat16(embed[3]).fp32(), bfloat16(embed[4]).fp32());
             }
-            // ALOGI("");
+
             mask[indices] = 0;
             {
                 llama_post.inference();
 
                 auto &output_post = llama_post.get_output("output_norm");           // 1 means get rmsnorm output
-                //AX_SYS_MinvalidateCache(output_post.phyAddr, output_post.pVirAddr, output_post.nSize);
                 unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                 std::vector<float> logits(output_post.nSize/sizeof(unsigned short));
                 for (int i = 0; i < output_post.nSize/sizeof(unsigned short); i++)
@@ -761,13 +705,14 @@ public:
                 float *post_decoder = (float *)output_decoder.pVirAddr;
                 
                 memcpy(scores.data(), post_decoder, output_decoder.nSize);
-                savetxt<float>(std::string("scores")+std::to_string(indices-max_pos_id)+std::string(".txt"), scores, '\n');
+                
                 bool ignore_eos = false;
                 if(indices < min_len)
                 {
                     ignore_eos = true;
                 }
-                max_index = sampling_ids(scores, cached_token, 25, ignore_eos);
+                
+                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_embed_num-3, ignore_eos);
                 next_token = max_index;
 
                 if (max_index == _attr.speech_embed_num-3)
@@ -788,7 +733,7 @@ public:
                         token_buffer.push_back(max_index);
                     }
                     buffer_cv.notify_one();
-                    ALOGI("token_buffer push %d", max_index);
+                    // ALOGI("token_buffer push %d", max_index);
 
                 }
             }
@@ -802,6 +747,11 @@ public:
                 break;
             }
         }
+
+        llm_finished = true;
+        buffer_cv.notify_all();
+        ALOGI("llm finished");
+
         printf("\n\n");
         fflush(stdout);
         float t_cost_ms = t_cost.cost();

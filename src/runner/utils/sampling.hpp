@@ -9,194 +9,191 @@
 #include <limits>
 #include <numeric>
 #include <iostream> // For debugging, can be removed
+#include <stdexcept>
 
 namespace sampling {
+    
+    // Numerically stable softmax implementation [[32]]
+    std::vector<float> softmax_stable(const std::vector<float>& logits) {
+        if (logits.empty()) return {};
 
-// Helper function to apply softmax to a vector of scores
-// Modifies the input vector in-place to hold probabilities
-void softmax(std::vector<float>& scores) {
-    if (scores.empty()) return;
+        // Find the maximum value for numerical stability [[32]]
+        float max_val = *std::max_element(logits.begin(), logits.end());
 
-    // Find the maximum score for numerical stability
-    float max_score = *std::max_element(scores.begin(), scores.end());
-
-    // Compute exp(score - max_score) and sum
-    float sum = 0.0;
-    for (float& s : scores) {
-        s = std::exp(s - max_score);
-        sum += s;
-    }
-
-    // Normalize by the sum
-    if (sum > 0.0) { // Avoid division by zero
-        for (float& s : scores) {
-            s /= sum;
+        std::vector<float> exp_values(logits.size());
+        float sum_exp = 0.0f;
+        for (size_t i = 0; i < logits.size(); ++i) {
+            exp_values[i] = std::exp(logits[i] - max_val); // Subtract max for stability [[32]]
+            sum_exp += exp_values[i];
         }
-    }
-}
 
-// Helper function for multinomial sampling based on probabilities
-// Returns the sampled index
-int multinomial_sample(const std::vector<float>& probabilities, std::mt19937& gen) {
-    if (probabilities.empty()) {
-        // Handle error or return a default value
-        // Returning -1 to indicate error
-        return -1;
-    }
-
-    std::uniform_real_distribution<float> dis(0.0, 1.0);
-    float rand_val = dis(gen);
-    float cumulative_prob = 0.0;
-
-    for (size_t i = 0; i < probabilities.size(); ++i) {
-        cumulative_prob += probabilities[i];
-        if (rand_val <= cumulative_prob) {
-            return static_cast<int>(i);
-        }
-    }
-    // In case of rounding errors, return the last index
-    return static_cast<int>(probabilities.size() - 1);
-}
-
-
-// Nucleus (Top-p) + Top-k Sampling
-// weighted_scores: vector of logits/scores for each token
-// top_p: cumulative probability threshold (0.0 to 1.0)
-// top_k: maximum number of top tokens to consider
-// gen: random number generator reference
-// Returns the sampled token ID (index)
-int nucleus_sampling(std::vector<float> weighted_scores, float top_p, int top_k, std::mt19937& gen) {
-    if (weighted_scores.empty()) {
-        return -1; // Or handle error appropriately
-    }
-
-    size_t vocab_size = weighted_scores.size();
-    // Apply softmax to get probabilities
-    softmax(weighted_scores); // weighted_scores now holds probabilities
-
-    // Create vector of (probability, index) pairs
-    std::vector<std::pair<float, int>> prob_index_pairs(vocab_size);
-    for (size_t i = 0; i < vocab_size; ++i) {
-        prob_index_pairs[i] = {weighted_scores[i], static_cast<int>(i)};
-    }
-
-    // Sort by probability descending
-    std::sort(prob_index_pairs.begin(), prob_index_pairs.end(),
-              [](const std::pair<float, int>& a, const std::pair<float, int>& b) {
-                  return a.first > b.first; // Descending order
-              });
-
-    // Select top-p and top-k candidates
-    std::vector<float> selected_probs;
-    std::vector<int> selected_indices;
-    float cum_prob = 0.0;
-
-    size_t limit = std::min(static_cast<size_t>(top_k), vocab_size);
-
-    for (size_t i = 0; i < limit; ++i) {
-        float prob = prob_index_pairs[i].first;
-        int idx = prob_index_pairs[i].second;
-
-        if (cum_prob < top_p) { // Check top-p condition
-            cum_prob += prob;
-            selected_probs.push_back(prob);
-            selected_indices.push_back(idx);
+        // Normalize
+        if (sum_exp > 0.0f) {
+            for (float& val : exp_values) {
+                val /= sum_exp;
+            }
         } else {
-            break; // Stop if cumulative probability is reached
+            // Handle case where all logits are very negative (sum_exp ~ 0)
+            // Assign uniform probability
+            float uniform_prob = 1.0f / static_cast<float>(exp_values.size());
+            for (float& val : exp_values) {
+                val = uniform_prob;
+            }
         }
+        return exp_values;
     }
 
-    // Handle case where no tokens were selected (e.g., all probs are 0 or top_p=0)
-    if (selected_probs.empty()) {
-         // Fallback: use the single highest probability token
-         // Or could fall back to random sampling on the full distribution
-         // Here, we'll pick the top token
-         return prob_index_pairs.empty() ? -1 : prob_index_pairs[0].second;
+    // Sort indices based on values in descending order [[29]]
+    std::vector<size_t> sort_indices_desc(const std::vector<float>& v) {
+        std::vector<size_t> idx(v.size());
+        std::iota(idx.begin(), idx.end(), 0); // Fill idx with 0, 1, ..., v.size()-1 [[23]]
+
+        // Sort indices based on the corresponding values in 'v' in descending order [[24]]
+        std::stable_sort(idx.begin(), idx.end(),
+                [&v](size_t i1, size_t i2) {return v[i1] > v[i2];}); // [[29]]
+
+        return idx;
     }
 
-    // Renormalize selected probabilities
-    float sum_selected = std::accumulate(selected_probs.begin(), selected_probs.end(), 0.0);
-    if (sum_selected > 0.0) {
-        for (float& p : selected_probs) {
-            p /= sum_selected;
+    // Multinomial sampling with replacement [[45]]
+    int sample_multinomial(const std::vector<float>& probabilities, std::mt19937& gen) {
+        if (probabilities.empty()) {
+            throw std::invalid_argument("Cannot sample from an empty probability distribution.");
         }
-    } else {
-        // If sum is zero, assign uniform probability
-        for (float& p : selected_probs) {
-             p = 1.0 / selected_probs.size();
+
+        std::discrete_distribution<int> dist(probabilities.begin(), probabilities.end()); // [[13]]
+        return dist(gen);
+    }
+
+    // --- Core Sampling Functions ---
+
+    // Nucleus (Top-p) Sampling with Top-k filtering
+    int nucleus_sampling(const std::vector<float>& weighted_scores, float top_p = 0.8f, int top_k = 25) {
+        if (weighted_scores.empty()) {
+            throw std::invalid_argument("weighted_scores cannot be empty.");
         }
-    }
 
+        // 1. Apply softmax to get probabilities
+        std::vector<float> probs = softmax_stable(weighted_scores);
 
-    // Sample from the selected subset
-    int sub_index = multinomial_sample(selected_probs, gen);
-    if (sub_index >= 0 && static_cast<size_t>(sub_index) < selected_indices.size()) {
-        return selected_indices[sub_index];
-    }
-    // Fallback
-    return selected_indices.empty() ? -1 : selected_indices[0];
-}
+        // 2. Get sorted indices (descending) [[29]]
+        std::vector<size_t> sorted_indices = sort_indices_desc(probs);
 
+        // 3. Apply Top-p and Top-k filtering
+        std::vector<float> filtered_probs;
+        std::vector<size_t> filtered_indices;
+        float cum_prob = 0.0f;
 
-// Random Sampling
-// weighted_scores: vector of logits/scores for each token
-// gen: random number generator reference
-// Returns the sampled token ID (index)
-int random_sampling(std::vector<float> weighted_scores, std::mt19937& gen) {
-    if (weighted_scores.empty()) {
-        return -1; // Or handle error appropriately
-    }
-    // Apply softmax to get probabilities
-    softmax(weighted_scores); // weighted_scores now holds probabilities
+        int actual_top_k = std::min(top_k, static_cast<int>(sorted_indices.size()));
 
-    // Sample directly from the full distribution
-    return multinomial_sample(weighted_scores, gen);
-}
-
-// Repetition-Aware Sampling (RAS)
-// weighted_scores: vector of logits/scores for each token
-// decoded_tokens: vector of previously sampled token IDs
-// top_p, top_k, win_size, tau_r: RAS parameters
-// gen: random number generator reference
-// Returns the sampled token ID (index)
-int ras_sampling(std::vector<float> weighted_scores,
-                 const std::vector<int>& decoded_tokens,
-                 float top_p = 0.8, int top_k = 25,
-                 int win_size = 10, float tau_r = 0.1 ) { // Default gen for convenience
-
-    std::random_device rd;
-    std::mt19937 gen(rd()); // Create the generator once
-    // Step 1: Get candidate from nucleus sampling
-    int top_ids = nucleus_sampling(weighted_scores, top_p, top_k, gen);
-
-    if (top_ids < 0 || decoded_tokens.empty() || win_size <= 0 || tau_r <= 0.0) {
-        // If nucleus failed or no history or invalid params, just return nucleus result or handle error
-        return top_ids;
-    }
-
-    // Step 2: Check for repetition in the recent window
-    int rep_num = 0;
-    size_t start_check_idx = (decoded_tokens.size() > static_cast<size_t>(win_size)) ?
-                             (decoded_tokens.size() - win_size) : 0;
-    size_t end_check_idx = decoded_tokens.size();
-
-    for (size_t i = start_check_idx; i < end_check_idx; ++i) {
-        if (decoded_tokens[i] == top_ids) {
-            rep_num++;
+        for (int i = 0; i < actual_top_k; ++i) {
+            size_t idx = sorted_indices[i];
+            float prob = probs[idx];
+            if (cum_prob < top_p && static_cast<int>(filtered_probs.size()) < top_k) {
+                cum_prob += prob;
+                filtered_probs.push_back(prob);
+                filtered_indices.push_back(idx);
+            } else {
+                break; // Stop if cumulative probability exceeds top_p or reached top_k limit
+            }
         }
+
+        if (filtered_probs.empty()) {
+            // This can happen if the first element's probability is >= top_p
+            // or if top_k is 0. Fall back to sampling from the top element.
+            // Or if all probabilities were 0 (handled by softmax_stable).
+            filtered_probs.push_back(1.0f);
+            filtered_indices.push_back(sorted_indices[0]);
+        }
+
+        // 4. Re-normalize the filtered probabilities (like PyTorch does)
+        // This is crucial to match Python behavior
+        float sum_filtered = std::accumulate(filtered_probs.begin(), filtered_probs.end(), 0.0f);
+        if (sum_filtered > 0.0f) {
+            for (float& prob : filtered_probs) {
+                prob /= sum_filtered;
+            }
+        }
+
+        // 5. Sample from the filtered distribution
+        static std::random_device rd; // Static to seed once
+        static std::mt19937 gen(rd());
+        int sampled_index_in_filtered = sample_multinomial(filtered_probs, gen);
+
+        // 6. Return the original index
+        return static_cast<int>(filtered_indices[sampled_index_in_filtered]);
     }
 
-    float repetition_ratio = static_cast<float>(rep_num) / static_cast<float>(win_size);
+    // Random Sampling (equivalent to Top-1 with temperature -> 1)
+    int random_sampling(const std::vector<float>& weighted_scores) {
+        if (weighted_scores.empty()) {
+            throw std::invalid_argument("weighted_scores cannot be empty.");
+        }
+        std::vector<float> probs = softmax_stable(weighted_scores);
 
-    // Step 3: If repetition is too high, fallback to random sampling
-    if (repetition_ratio >= tau_r) {
-        // std::cout << "RAS triggered for token " << top_ids << " (rep ratio: " << repetition_ratio << ")\n"; // Debug
-        return random_sampling(weighted_scores, gen);
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        return sample_multinomial(probs, gen);
     }
 
-    // Otherwise, return the nucleus sampling result
-    return top_ids;
-}
+    // Repetition-Aware Sampling (RAS)
+    int ras_sampling(const std::vector<float>& weighted_scores,
+                    const std::vector<int>& decoded_tokens,
+                    int speech_token_size, // Assuming this is passed or part of context
+                    float top_p = 0.8f, int top_k = 25,
+                    int win_size = 10, float tau_r = 0.1f) {
+
+        // 1. Perform Nucleus Sampling
+        int top_id = nucleus_sampling(weighted_scores, top_p, top_k);
+
+        // 2. Check for repetition
+        int rep_num = 0;
+        int window_start = std::max(0, static_cast<int>(decoded_tokens.size()) - win_size);
+        for (size_t i = window_start; i < decoded_tokens.size(); ++i) {
+            if (decoded_tokens[i] == top_id) {
+                rep_num++;
+            }
+        }
+
+        // 3. If repetition threshold is met, fallback to random sampling
+        if (rep_num >= static_cast<int>(win_size * tau_r)) {
+            top_id = random_sampling(weighted_scores);
+        }
+
+        return top_id;
+    }
+
+    // Main sampling function with EOS handling
+    int sampling_ids(const std::vector<float>& weighted_scores,
+                    const std::vector<int>& decoded_tokens,
+                    int speech_token_size, // Assuming this is passed or part of context
+                    bool ignore_eos = true,
+                    int max_trials = 100) {
+
+        static std::random_device rd;
+        static std::mt19937 gen(rd()); // Static for efficiency in loops
+
+        int num_trials = 0;
+        int top_id = -1; // Initialize
+
+        while (true) {
+            top_id = ras_sampling(weighted_scores, decoded_tokens, speech_token_size);
+
+            // Check EOS condition
+            if (!ignore_eos || (speech_token_size < 0 || top_id != speech_token_size)) {
+                break; // Accept the sample if EOS is not ignored, or if it's not the EOS token
+            }
+
+            num_trials++;
+            if (num_trials > max_trials) {
+                throw std::runtime_error("sampling reaches max_trials " + std::to_string(max_trials) +
+                                        " and still gets eos when ignore_eos is True, check your input!");
+            }
+        }
+        return top_id;
+    }
+
+
 
 } // namespace sampling
 
