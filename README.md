@@ -43,98 +43,114 @@ comming soon
   $ tree install/bin/
     install/bin/
     ├── main
-    ├── run_bf16.sh
-    └── run_qwen_1.8B.sh
+    └── run.sh
   ```
   
 ## 运行示例
 
-### 1. 图像理解
+### 1. 音频生成（音色复刻）  
 
 ![demo.jpg](assets/demo.jpg)
 
-#### 1. 首先启动 HTTP Tokenizer Server  
+#### 1. 首先处理prompt speech  
+```
+cd src
+python ../scripts/process_prompt.py
+```
+注意根据实际情况传入参数
+```
+args.add_argument('--model_dir', type=str, default="../../model_convert/pretrained_models/CosyVoice2-0.5B/")
+args.add_argument('--wetext_dir', type=str, default="../../model_convert/pengzhendong/wetext/")
+args.add_argument('--sample_rate', type=int, default=24000)
+args.add_argument('--zero_shot_spk_id', type=str, default="")
+args.add_argument('--tts_text', type=str, default="君不见黄河之水天上来，奔流到海不复回。君不见高堂明镜悲白发，朝如青丝暮成雪。")
+args.add_argument('--prompt_text', type=str, default="希望你以后能够做的比我还好呦。")
+args.add_argument('--prompt_speech', type=str, default="../../model_convert/asset/zero_shot_prompt.wav")
+```
+
+#### 2. 启动 HTTP Tokenizer Server  
 ```
 cd scripts
-python qwen2_tokenizer_image_448.py --host {your host} --port {your port}   # 和 run_qwen2_5vl_image.sh 中一致
+python cosyvoice2_tokenizer.py --host {your host} --port {your port}   # 和 run.sh 中一致
 ```
 
 #### 2. 在板子上运行模型  
-1) 先修改 `run_qwen2_5vl_image.sh` 中的http host.  
-2) 将 `scripts/run_qwen2_5vl_image.sh`, `src/post_config.json` ,`build/install/bin/main`, `assets/demo.jpg` 拷贝到爱芯板子上  
-3) 运行 `run_qwen2_5vl_image.sh`  
+1) 先修改 `run.sh` 中的http host.  
+2) 将 `scripts/run.sh`, `build/install/bin/main`, `process_prompt.py 生成的文件` 拷贝到爱芯板子上  
+3) 运行 `run.sh`  
 ```shell
-root@ax650 Qwen2.5-VL-3B-Instruct-Infer # bash run_qwen2_5vl_image.sh 
-[I][                            Init][ 129]: LLM init start
-bos_id: -1, eos_id: 151645
-  2% | █                                 |   1 /  40 [0.05s<2.00s, 20.00 count/s] tokenizer init ok[I][                            Init][  26]: LLaMaEmbedSelector use mmap
-100% | ████████████████████████████████ |  40 /  40 [19.48s<19.48s, 2.05 count/s] init vpm axmodel ok,remain_cmm(2559 MB)650-prefill_320/qwen2_5_vl_p320_l35_together.axmodel ok
-[I][                            Init][ 277]: max_token_len : 1023
-[I][                            Init][ 282]: kv_cache_size : 256, kv_cache_num: 1023
-[I][                            Init][ 290]: prefill_token_num : 320
-[I][                            Init][ 292]: vpm_height : 1024,vpm_width : 392
-[I][                            Init][ 301]: LLM init ok
+root@ax650 ~/yongqiang/lhj/Cosyvoice2.Axera/cpp/src # bash run.sh 
+rm: cannot remove 'output*.wav': No such file or directory
+[I][                            Init][ 108]: LLM init start
+[I][                            Init][  34]: connect http://10.122.86.184:12345 ok
+bos_id: 0, eos_id: 1773
+  7% | ███                               |   2 /  27 [3.11s<42.04s, 0.64 count/s] embed_selector init ok[I][                            Init][ 138]: attr.axmodel_num:24
+100% | ████████████████████████████████ |  27 /  27 [10.32s<10.32s, 2.62 count/s] init post axmodel ok,remain_cmm(7178 MB)
+[I][                            Init][ 216]: max_token_len : 1023
+[I][                            Init][ 221]: kv_cache_size : 128, kv_cache_num: 1023
+[I][                            Init][ 229]: prefill_token_num : 128
+[I][                            Init][ 233]: grp: 1, prefill_max_token_num : 1
+[I][                            Init][ 233]: grp: 2, prefill_max_token_num : 128
+[I][                            Init][ 233]: grp: 3, prefill_max_token_num : 256
+[I][                            Init][ 233]: grp: 4, prefill_max_token_num : 384
+[I][                            Init][ 233]: grp: 5, prefill_max_token_num : 512
+[I][                            Init][ 237]: prefill_max_token_num : 512
+[I][                            Init][ 249]: LLM init ok
+[I][                            Init][ 154]: Token2Wav init ok
+[I][                            main][ 273]: 
+[I][                             Run][ 388]: input token num : 142, prefill_split_num : 2
+[I][                             Run][ 422]: input_num_token:128
+[I][                             Run][ 422]: input_num_token:14
+[I][                             Run][ 607]: ttft: 236.90 ms
+[Main/Token2Wav Thread] Processing batch of 28 tokens...
+Successfully saved audio to output_0.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 53 tokens...
+Successfully saved audio to output_1.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_2.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_3.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_4.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_5.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_6.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_7.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_8.wav (32-bit Float PCM).
+[Main/Token2Wav Thread] Processing batch of 78 tokens...
+Successfully saved audio to output_9.wav (32-bit Float PCM).
+[I][                             Run][ 723]: hit eos, llm finished
+[I][                             Run][ 753]: llm finished
+[Main/Token2Wav Thread] Buffer is empty and LLM finished. Exiting.
+
+
+[I][                             Run][ 758]: total decode tokens:271
+[N][                             Run][ 759]: hit eos,avg 21.47 token/s
+
+Successfully saved audio to output_10.wav (32-bit Float PCM).
+Successfully saved audio to output.wav (32-bit Float PCM).
+
+Voice generation pipeline completed.
 Type "q" to exit, Ctrl+c to stop current running
-prompt >> prompt >> Describe this image.
-image >> demo.jpg
-[I][                          Encode][ 416]: image encode time : 794.763000 ms, size : 524288
-[I][                             Run][ 633]: ttft: 43535.27 ms
-The image shows a person and a dog sitting on a sandy beach. The person is wearing a plaid shirt and shorts, and the dog is wearing a harness. They appear to be looking at something on a device, possibly a phone or tablet, which the person is holding. The beach is sandy and there are footprints in the sand. The background shows the ocean with waves crashing onto the shore, and the sun is low in the sky, suggesting it might be early morning or late afternoon.
-
-[N][                             Run][ 774]: hit eos,avg 0.03 token/s
+text >> 
 ```
+音频输出：
+[output.wav](asset/output.wav)
 
-### 2. 视频理解
 
-<div style="
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);  /* 4列等宽 */
-    grid-template-rows: repeat(2, 1fr);     /* 2行等高 */
-    gap: 10px;                              /* 图片间距 */
-    width: 80%;                             /* 容器宽度 */
-    margin: 0 auto;                         /* 居中显示 */
-">
-    <img src="demo_cv308/frame_0075.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0077.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0079.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0081.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0083.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0085.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0087.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-    <img src="demo_cv308/frame_0089.jpg" style="width: 100%; height: 100%; object-fit: cover;">
-</div>
-
-#### 1. 首先启动 HTTP Tokenizer Server  
-```
-cd scripts
-python qwen2_tokenizer_video_308.py --host {your host} --port {your port}   # 和 run_qwen2_5vl_video.sh 中一致
-```
-
-#### 2. 在板子上运行模型  
-1) 先修改 `run_qwen2_5vl_video.sh` 中的http host.  
-2) 将 `scripts/run_qwen2_5vl_video.sh`, `src/post_config.json` ,`build/install/bin/main`, `demo_cv308` 拷贝到爱芯板子上  
-3) 运行 `run_qwen2_5vl_video.sh`  
-```shell
-
-```
-
-## 图像理解推理速度  
+##  音频生成速度  
 | Stage | Time |
 |------|------|
-| Image Encoder (448x448) | 790 ms  | 
-| Prefill (320) |  43535.27 ms    |
-| Decode  |   token/s |
-
-## 视频理解推理速度  
-| Stage | Time |
-|------|------|
-| Image Encoder (8x308x308) |  ms  | 
-| Prefill (512) |   ms    |
-| Decode  |   token/s |
+| llm prefill ( input_token_num + prompt_token_num 在 [0,128 ] ) | 104 ms  | 
+| llm prefill ( input_token_num + prompt_token_num 在 [128,256 ] ) | 234 ms  | 
+| Decode  |  21.24 token/s token/s |
 
 ## Reference
 
-- [Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
+- [Cosyvoice](https://github.com/FunAudioLLM/CosyVoice)
 
 ## 技术讨论
 
