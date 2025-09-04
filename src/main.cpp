@@ -13,6 +13,7 @@
 #include "runner/Token2wav.hpp"
 #include "runner/utils/slice_3d.h"
 #include "runner/utils/wav.hpp"
+#include "runner/utils/timer.hpp"
 #include "cmdline.hpp"
 #include "runner/utils/files.hpp"
 
@@ -96,7 +97,8 @@ int tts(
 )
 {
     std::vector <float> output;
-
+    timer time_total;
+    time_total.start();
     try {
         // Lambda to capture the LLM instance and shared resources
         // This makes it easy to pass them to the thread
@@ -205,6 +207,7 @@ int tts(
         saveVectorAsWavFloat(speech, path, 24000, 1);
         saveVectorAsWavFloat(output, "output.wav", 24000, 1);
 
+        ALOGI("tts total use time: %.3f s", time_total.cost()/1000);
         reset();
         std::cout << "\nVoice generation pipeline completed.\n";
 
