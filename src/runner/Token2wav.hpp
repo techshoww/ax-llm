@@ -566,8 +566,7 @@ public:
             }
 
             hift_cache_dict["mel"] = slice_3d_last_dim_from<float>(tts_mel1, 1, 80, tts_mel1.size()/80, -mel_cache_len);
-            // hift_cache_dict["source"] = slice_3d_last_dim_from<float>(source, 1,1, source.size(), -source_cache_len);   // 
-            // hift_cache_dict["speech"] = slice_3d_last_dim_from<float>(speech, speech.size(), 1, 1, -source_cache_len);  // speech 是 2d 的，可以用3d函数按照 dim0 ==1 处理
+
             int offset = speech.size();
             if(speech.size() > source_cache_len)
             {
@@ -586,7 +585,6 @@ public:
             }
             else if (- neg_offset*480 >= source_cache_len)
             {
-                // tts_speech = slice_3d_last_dim_from<float>(speech,  1, 1, speech.size(),  neg_offset*480);
                 tts_speech.assign(speech.end() + neg_offset*480, speech.end());
 
                 if(!hift_cache_dict.empty())
