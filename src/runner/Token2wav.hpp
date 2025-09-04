@@ -82,9 +82,9 @@ public:
             return false;
         }
 
-        if (!flow_embed_selector.Init("../../model_convert/flow.input_embedding.float16.bin", flow_embed_num, flow_embed_size, false))
+        if (!flow_embed_selector.Init((model_dir+"/flow.input_embedding.float16.bin").c_str(), flow_embed_num, flow_embed_size, false))
         {
-            ALOGE("flow_embed_selector.Init(%s, %d, %d) failed", "../../model_convert/flow.input_embedding.float16.bin",flow_embed_num, flow_embed_size);
+            ALOGE("flow_embed_selector.Init(%s, %d, %d) failed", (model_dir+"/flow.input_embedding.float16.bin").c_str(),flow_embed_num, flow_embed_size);
             return false;
         }
 
