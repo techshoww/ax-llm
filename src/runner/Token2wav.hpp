@@ -575,12 +575,31 @@ public:
 
         }
         else{
-            tts_speech = slice_3d_last_dim_from<float>(speech, 1, 1, speech.size(), neg_offset*480);
 
-            if(!hift_cache_dict.empty())
+            if (speech.size() - neg_offset*480 >= source_cache_len)
             {
-                fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
+                tts_speech = slice_3d_last_dim_from<float>(speech, 1, 1, speech.size(), neg_offset*480);
+
+                if(!hift_cache_dict.empty())
+                {
+                    fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
+                }
             }
+            else{
+                
+                tts_speech.clear();
+                tts_speech.insert(tts_speech.begin(), speech.end()-source_cache_len, speech.end());
+
+                if(!hift_cache_dict.empty())
+                {
+                    fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
+                }
+
+                int offset = neg_offset*480 - (speech.size() - source_cache_len);
+
+                tts_speech.assign(tts_speech.begin() + offset, tts_speech.end());
+            }
+            
         }
 
         return tts_speech;
