@@ -17,17 +17,14 @@
 
 ### 已支持模型
 
-- Qwen2.5-VL-3B-Instruct
+- CosyVoice2
 
-### 获取地址
-
-comming soon
 
 ## 源码编译
 
 -  clone 本项目  
     ```shell
-    git clone  https://github.com/AXERA-TECH/ax-llm.git
+    git clone -b cosyvoice2  https://github.com/AXERA-TECH/ax-llm.git
     cd ax-llm
     ```
 - clone `ax650n_bsp_sdk` 代码  
@@ -50,9 +47,13 @@ comming soon
 
 ### 1. 音频生成（音色复刻）  
 
-![demo.jpg](assets/demo.jpg)
+#### 1. 安装python  
+需要第2，3步需要使用这些python包，如果在PC上运行第2，3步，就在PC上安装。  
+```
+pip3 install -r cpp/scripts/requirements.txt
+```  
 
-#### 1. 首先处理prompt speech  
+#### 2. 首先处理prompt speech  
 ```
 cd src
 python ../scripts/process_prompt.py
@@ -68,13 +69,13 @@ args.add_argument('--prompt_text', type=str, default="希望你以后能够做�
 args.add_argument('--prompt_speech', type=str, default="../../model_convert/asset/zero_shot_prompt.wav")
 ```
 
-#### 2. 启动 HTTP Tokenizer Server  
+#### 3. 启动 HTTP Tokenizer Server  
 ```
 cd scripts
 python cosyvoice2_tokenizer.py --host {your host} --port {your port}   # 和 run.sh 中一致
 ```
 
-#### 2. 在板子上运行模型  
+#### 4. 在板子上运行模型  
 1) 先修改 `run.sh` 中的http host.  
 2) 将 `scripts/run.sh`, `build/install/bin/main`, `process_prompt.py 生成的文件` 拷贝到爱芯板子上  
 3) 运行 `run.sh`  
