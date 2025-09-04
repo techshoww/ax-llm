@@ -25,11 +25,12 @@ slice_3d_last_dim_from(std::vector<T>& data_1d,
                        size_t dim0, size_t dim1, size_t dim2,
                        int start2);
 
-template <typename T>
-typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
-slice_3d_last_dim_last_n(std::vector<T>& data_1d,
-                         size_t dim0, size_t dim1, size_t dim2,
-                         size_t n);
+// 这个函数有bug
+// template <typename T>
+// typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
+// slice_3d_last_dim_last_n(std::vector<T>& data_1d,
+//                          size_t dim0, size_t dim1, size_t dim2,
+//                          size_t n);
 
 template <typename T>
 typename std::enable_if<std::is_arithmetic<T>::value, std::vector<T>>::type
