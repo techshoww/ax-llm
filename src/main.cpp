@@ -111,7 +111,8 @@ int tts(
 
         int token_offset = 0;
         int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2Wav.flow_embed_size;
-        int prompt_token_align_len = int(prompt_token_len / lToken2Wav.token_hop_len) * lToken2Wav.token_hop_len;
+        // int prompt_token_align_len = int(prompt_token_len / lToken2Wav.token_hop_len) * lToken2Wav.token_hop_len;
+        int prompt_token_align_len = 75;  // only support 75 now
 
         std::vector<float> prompt_speech_embeds_flow1;
         prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin()+prompt_token_align_len * 512);
