@@ -48,7 +48,7 @@ private:
     ax_runner_ax650 hift_58;
 
     std::vector<float> rand_noise;
-    std::vector<float> t_span = {0.0000, 0.0123, 0.0489, 0.1090, 0.1910, 0.2929, 0.4122, 0.5460, 0.6910,0.8436, 1.0000};
+    std::vector<float> t_span;
 
     LLaMaEmbedSelector flow_embed_selector;
     
@@ -65,10 +65,34 @@ private:
         return readtxt("speech_window_2x8x480.txt", speech_window);
     }
 
+    int init_tspan(int n_timesteps)
+    {
+        // std::vector<float> t_span_10 = {0.0000, 0.0123, 0.0489, 0.1090, 0.1910, 0.2929, 0.4122, 0.5460, 0.6910,0.8436, 1.0000};
+        // std::vector<float> t_span_7 = {0.0000, 0.1429, 0.2857, 0.4286, 0.5714, 0.7143, 0.8571, 1.0000}; // n_timesteps = 7
+        // std::vector<float> t_span_6 = {0.0000, 0.1667, 0.3333, 0.5000, 0.6667, 0.8333, 1.0000};       // n_timesteps = 6
+        // std::vector<float> t_span_5 = {0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000 };
+        // std::vector<float> t_span_4 = {0.0000, 0.2500, 0.5000, 0.7500, 1.0000};
+
+        if(n_timesteps <4)
+        {
+            return -1;
+        }
+
+        n_timesteps = n_timesteps;
+        t_span = linspace(0.0, 1.0, n_timesteps + 1);
+        return 0;
+    }
+
 public:
-    bool Init(std::string model_dir)
+    bool Init(std::string model_dir, int n_timesteps)
     {
         int ret;
+
+        ret = init_tspan(n_timesteps);
+        if(ret != 0){
+            ALOGE("init_tspan failed, n_timesteps:%d", n_timesteps);
+            return false;
+        }
 
         ret = init_noise(model_dir);
         if(ret != 0){

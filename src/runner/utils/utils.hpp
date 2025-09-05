@@ -10,6 +10,7 @@
 #include <string>
 #include <sstream>
 #include <type_traits>
+#include <stdexcept> // 用于异常处理
 
 // 函数模板：支持任意元素类型的vector
 template <typename T>
@@ -72,4 +73,25 @@ int readtxt(const std::string& filename, std::vector<T>& data) {
     }
     file.close();
     return 0;
+}
+
+std::vector<float> linspace(float start, float end, std::size_t num_steps) {
+    if (num_steps == 0) {
+        return {}; // 返回空向量
+    }
+    if (num_steps == 1) {
+        return {start}; // 如果只需要一个点，返回起始值
+    }
+
+    std::vector<float> result(num_steps);
+    float step_size = (end - start) / (num_steps - 1); // 计算步长
+
+    for (std::size_t i = 0; i < num_steps; ++i) {
+        result[i] = start + i * step_size;
+    }
+
+    // 确保最后一个值精确等于 end，避免浮点数精度带来的误差
+    result.back() = end;
+
+    return result;
 }

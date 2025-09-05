@@ -1,10 +1,12 @@
 LLM_DIR=../../model_convert/CosyVoice-BlankEN-Ax650-prefill_512/
+# LLM_DIR=../../model_convert/CosyVoice-BlankEN-Ax650-prefill_512-0905
 TOKEN2WAV_DIR=../../model_convert/token2wav-axmodels/
 
 rm output*.wav
 ../build/install/bin/main \
 --template_filename_axmodel "${LLM_DIR}/qwen2_p128_l%d_together.axmodel" \
 --token2wav_axmodel_dir $TOKEN2WAV_DIR \
+--n_timesteps 6 \
 --axmodel_num 24 \
 --bos 0 --eos 0 \
 --filename_tokenizer_model "http://10.122.86.184:12345" \

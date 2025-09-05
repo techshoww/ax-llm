@@ -141,6 +141,10 @@ int tts(
                         g_llm_finished.load() ||\
                         g_stop.load();
             });
+            // g_buffer_cv.wait(lock, [&] {
+            //     return  g_llm_finished.load() ||\
+            //             g_stop.load();
+            // });
 
             if(g_stop)
             {
@@ -163,9 +167,11 @@ int tts(
 
                 // --- Simulate Token2Wav Processing ---
                 std::cout << "[Main/Token2Wav Thread] Processing batch of " << token.size() << " tokens...\n";
-
+                // timer t_t2v;
+                // t_t2v.start();
                 auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset, false);
                 token_offset += this_token_hop_len;
+                // ALOGI("token2wav use time %.3f ms", t_t2v.cost());
 
                 //TODO: 另起一个线程处理生成的音频
                 output.insert(output.end(), speech.begin(), speech.end());
@@ -248,6 +254,7 @@ int main(int argc, char *argv[])
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
+    cmd.add<int>("n_timesteps", 'ts', "num of time steps", false, 7);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
 
     cmd.parse_check(argc, argv);
@@ -266,7 +273,7 @@ int main(int argc, char *argv[])
     attr.b_eos = cmd.get<bool>("eos");
     attr.axmodel_num = cmd.get<int>("axmodel_num");
     std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
-   
+    int n_timesteps = cmd.get<int>("n_timesteps");
 
     b_continue = cmd.get<bool>("continue");
 
@@ -275,7 +282,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!lToken2Wav.Init(token2wav_axmodel_dir))
+    if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
         return -1;
     }
