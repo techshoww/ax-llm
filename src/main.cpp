@@ -111,6 +111,11 @@ int tts(
 
         int token_offset = 0;
         int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2Wav.flow_embed_size;
+        if(prompt_token_len < 75)
+        {
+            ALOGE("Error, prompt speech token len %d < 75", prompt_token_len);
+            return -1;
+        }
         // int prompt_token_align_len = int(prompt_token_len / lToken2Wav.token_hop_len) * lToken2Wav.token_hop_len;
         int prompt_token_align_len = 75;  // only support 75 now
 
