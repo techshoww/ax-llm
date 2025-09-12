@@ -6,10 +6,10 @@ rm output*.wav
 ../build/install/bin/main \
 --template_filename_axmodel "${LLM_DIR}/qwen2_p128_l%d_together.axmodel" \
 --token2wav_axmodel_dir $TOKEN2WAV_DIR \
---n_timesteps 6 \
+--n_timesteps 10 \
 --axmodel_num 24 \
 --bos 0 --eos 0 \
---filename_tokenizer_model "http://10.122.86.184:12345" \
+--filename_tokenizer_model "http://127.0.0.1:12345" \
 --filename_post_axmodel "${LLM_DIR}/qwen2_post.axmodel" \
 --filename_decoder_axmodel "${LLM_DIR}/llm_decoder.axmodel" \
 --filename_tokens_embed "${LLM_DIR}/model.embed_tokens.weight.bfloat16.bin" \

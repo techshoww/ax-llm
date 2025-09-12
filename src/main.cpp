@@ -250,6 +250,7 @@ int main(int argc, char *argv[])
     cmd.add<std::string>("filename_tokens_embed", 0, "tokens embed path", false, attr.filename_tokens_embed);
     cmd.add<std::string>("filename_llm_embed", 0, "tokens embed path", false, attr.filename_llm_embed);
     cmd.add<std::string>("filename_speech_embed", 0, "tokens embed path", false, attr.filename_speech_embed);
+    cmd.add<std::string>("prompt_files", 0, "prompt files dir", false, "prompt_files");
     
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
@@ -274,6 +275,7 @@ int main(int argc, char *argv[])
     attr.axmodel_num = cmd.get<int>("axmodel_num");
     std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
     int n_timesteps = cmd.get<int>("n_timesteps");
+    std::string prompt_files = cmd.get<std::string>("prompt_files");
 
     b_continue = cmd.get<bool>("continue");
 
@@ -298,10 +300,10 @@ int main(int argc, char *argv[])
     std::vector<float> prompt_speech_embeds_flow;
     std::vector<float> spk_embeds;
     
-    readtxt("prompt_text_1_15.txt", prompt_text_token);
-    readtxt("llm_prompt_speech_token_1_87.txt", prompt_speech_token);
-    readtxt("prompt_speech_feat_1_174_80.txt", prompt_feat);
-    readtxt<float>("flow_embedding_1_192.txt", spk_embeds);    
+    readtxt(prompt_files+"/prompt_text.txt", prompt_text_token);
+    readtxt(prompt_files+"/llm_prompt_speech_token.txt", prompt_speech_token);
+    readtxt(prompt_files+"/prompt_speech_feat.txt", prompt_feat);
+    readtxt<float>(prompt_files+"/flow_embedding.txt", spk_embeds);    
     
     lLaMa.TextToken2Embeds(prompt_text_token, prompt_text_embeds);
     lLaMa.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds);

@@ -756,7 +756,7 @@ public:
         fflush(stdout);
         float t_cost_ms = t_cost.cost();
         ALOGI("total decode tokens:%d", cached_token.size());
-        ALOGN("hit eos,avg %.2f token/s\n", token_ids.size() / (t_cost_ms / 1000));
+        ALOGN("hit eos, decode avg %.2f token/s\n", cached_token.size() / (t_cost_ms / 1000));
 
         for (size_t i = 0; i < _attr.axmodel_num; i++)
         {

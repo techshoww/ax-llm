@@ -57,12 +57,12 @@ private:
 
     int init_noise(std::string model_dir)
     {
-        return readtxt("rand_noise_1_80_300.txt", rand_noise);
+        return readtxt(model_dir+"/rand_noise_1_80_300.txt", rand_noise);
     }
 
     int init_speech_window(std::string model_dir)
     {
-        return readtxt("speech_window_2x8x480.txt", speech_window);
+        return readtxt(model_dir+"/speech_window_2x8x480.txt", speech_window);
     }
 
     int init_tspan(int n_timesteps)
