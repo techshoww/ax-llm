@@ -18,6 +18,16 @@ add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# mnn
+option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) # 明确写出帮助字符串是好习惯
+option(MNN_KLEIDIAI "Enable Kleidiai backend for MNN" OFF)
+option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
+
+set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/MNN)
+add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/MNN)
+
+
+include_directories(third_party/MNN/include/)
 
 # bsp
 if(NOT BSP_MSP_DIR)
@@ -75,16 +85,12 @@ function(build_exec name main_source)
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
     target_link_libraries(${name} ${OpenCV_LIBS})
+    target_link_libraries(${name} MNN)
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
 build_exec(main src/main.cpp)
-# build_exec(main_qwen src/main_qwen.cpp)
 
 file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh")
 install(FILES ${RUN_SCRIPT} DESTINATION bin/)
 
-file(GLOB LLAMA3_TOKENIZER "${CMAKE_SOURCE_DIR}/scripts/llama3_tokenizer/*")
-install(FILES ${LLAMA3_TOKENIZER} DESTINATION bin/llama3_tokenizer/)
-
-# add_executable(fp32_to_bf16 tools/fp32_to_bf16.cpp)

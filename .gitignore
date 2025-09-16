@@ -5,7 +5,6 @@ build*
 tools/test.cpp
 !build.sh
 qtproj/LLM-Chat/CMakeLists.txt.user
-third_party
 *.txt
 __pycache__/
 *.wav
