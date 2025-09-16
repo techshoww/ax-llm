@@ -21,6 +21,8 @@
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
 
+// nccn header 
+#include "net.h"
 class Token2Wav
 {
 public:
@@ -44,8 +46,11 @@ private:
     ax_runner_ax650 flow_estimator_250;
     ax_runner_ax650 flow_estimator_300;
 
-    ax_runner_ax650 hift_50_first;
-    ax_runner_ax650 hift_58;
+    ax_runner_ax650 hift_p2_50_first;
+    ax_runner_ax650 hift_p2_58;
+
+    ncnn::Net hift_p1_50_first;
+    ncnn::Net hift_p1_58;
 
     std::vector<float> rand_noise;
     std::vector<float> t_span;
@@ -161,19 +166,32 @@ public:
             return false;
         }
 
-        ret = hift_50_first.init((model_dir+"/hift_50_first.axmodel").c_str(), false);
+        ret = hift_p2_50_first.init((model_dir+"/hift_p2_50_first.axmodel").c_str(), false);
         if (ret != 0)
         {
-            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_50_first.axmodel").c_str());
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_50_first.axmodel").c_str());
             return false;
         }
 
-        ret = hift_58.init((model_dir+"/hift_58.axmodel").c_str(), false);
+        ret = hift_p2_58.init((model_dir+"/hift_p2_58.axmodel").c_str(), false);
         if (ret != 0)
         {
-            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_58.axmodel").c_str());
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_58.axmodel").c_str());
             return false;
         }
+
+        const std::string hift_p1_50_first_param_path = model_dir+"/hift_p1_50_first.ncnn.param";
+        const std::string hift_p1_50_first_bin_path = model_dir+"/hift_p1_50_first.ncnn.bin";
+
+        hift_p1_50_first.load_param(hift_p1_50_first_param_path.data());
+        hift_p1_50_first.load_model(hift_p1_50_first_bin_path.data());
+
+        const std::string hift_p1_58_param_path = model_dir+"/hift_p1_58.ncnn.param";
+        const std::string hift_p1_58_bin_path = model_dir+"/hift_p1_58.ncnn.bin";
+
+        hift_p1_58.load_param(hift_p1_58_param_path.data());
+        hift_p1_58.load_model(hift_p1_58_bin_path.data());
+
 
         ALOGI("Token2Wav init ok");
         return true;
@@ -188,8 +206,10 @@ public:
         flow_estimator_200.release();
         flow_estimator_250.release();
         flow_estimator_300.release();
-        hift_50_first.release();
-        hift_58.release();
+        hift_p2_50_first.release();
+        hift_p2_58.release();
+        hift_p1_50_first.clear();
+        hift_p1_58.clear();
         flow_embed_selector.Deinit();
     }
 
@@ -318,39 +338,64 @@ public:
     int infer_hift(std::vector<float> &mel, std::vector<float> &cache_source, 
                     std::vector<float> & tts_speech, std::vector<float> & tts_source)
     {
-        ax_runner_ax650 * model;
+        ncnn::Net * model_p1;
+        ax_runner_ax650 * model_p2;
         int len = mel.size()/(80);
         
         if(len == 50 && cache_source.empty())
         { 
-            model = &hift_50_first;
+            model_p1 = &hift_p1_50_first;
+            model_p2 = &hift_p2_50_first;
         }else if(len == 58 && !cache_source.empty())
         {
-            model = &hift_58;
+            model_p1 = &hift_p1_58;
+            model_p2 = &hift_p2_58;
         }else
         {
             ALOGE("invalid size: %d", len);
             return -1;
         }
 
-        void * p = model->get_input("mel").pVirAddr;
+        ncnn::Mat in(len, 80, 1, sizeof(float)); // w, h, c, elemsize
+        float* mat_data_ptr = (float*)in.data;
+        memcpy(mat_data_ptr, mel.data(), mel.size()*sizeof(float));
+
+        ncnn::Extractor ex = model_p1->create_extractor();
+        ex.set_light_mode(true);
+        //sex.set_num_threads(4);
+        ex.input("mel", in);
+
+        ncnn::Mat out_mat;
+        ex.extract("s", out_mat);
+
+        if (out_mat.empty()) {
+            ALOGE("Error: Output Mat is empty.\n");
+            // 处理错误
+            return -1; // 或其他错误码
+        }
+
+        void * p = model_p2->get_input("s").pVirAddr;
+        memcpy(p, (float *)out_mat.data, out_mat.total() * sizeof(float));
+
+
+        p = model_p2->get_input("mel").pVirAddr;
         memcpy(p, mel.data(), mel.size() * sizeof(float));
         if(!cache_source.empty())
         {
-            p = model->get_input("hift_cache_source").pVirAddr;
+            p = model_p2->get_input("hift_cache_source").pVirAddr;
             memcpy(p, cache_source.data(), cache_source.size() * sizeof(float));
         }
 
-        model->inference();
+        model_p2->inference();
 
-        auto &output_speech = model->get_output("audio");
+        auto &output_speech = model_p2->get_output("audio");
         if(tts_speech.empty() || tts_speech.size() != output_speech.nSize / sizeof(float))
         {
             tts_speech.resize(output_speech.nSize / sizeof(float));
         }
         memcpy(tts_speech.data(), output_speech.pVirAddr, output_speech.nSize);
 
-        auto &output_source = model->get_output("x");
+        auto &output_source = model_p2->get_output("x");
         if(tts_source.empty() || tts_source.size() != output_source.nSize / sizeof(float))
         {
             tts_source.resize(output_source.nSize / sizeof(float));

@@ -46,12 +46,18 @@ link_directories(${BSP_MSP_DIR}/lib)
 # include_directories(third_party/re2)
 # link_directories(${CMAKE_BINARY_DIR}/lib)
 
+set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/ncnn)
+add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/ncnn)
+set(NCNN_INT8 OFF)
+set(NCNN_BF16 OFF)
+
 # 添加 FLAGS 检查代码是否有明显 bug
 include(overlook.cmake)
 
 include_directories(src)
 include_directories(src/runner)
 include_directories(src/runner/utils)
+include_directories(third_party/ncnn/src)
 
 if(NOT OpenCV_DIR)
     set(OpenCV_DIR ${CMAKE_SOURCE_DIR}/third_party/libopencv-4.6-aarch64-none/lib/cmake/opencv4)
@@ -75,6 +81,7 @@ function(build_exec name main_source)
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
     target_link_libraries(${name} ${OpenCV_LIBS})
+    target_link_libraries(${name} ncnn)
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
