@@ -189,7 +189,7 @@ public:
         config.numThread = 2;
         config.type      = static_cast<MNNForwardType>(MNN_FORWARD_CPU);
         MNN::BackendConfig backendConfig;
-        backendConfig.precision = (MNN::BackendConfig::PrecisionMode)2;
+        backendConfig.precision = (MNN::BackendConfig::PrecisionMode)1;
         config.backendConfig = &backendConfig;
 
         hift_p1_50_first = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile( (model_dir+"/hift_p1_50_first.mnn").c_str() ));
@@ -374,7 +374,7 @@ public:
         }
 
         std::vector<int> dims{1, 80, len};
-        auto tensor = MNN::Tensor::create<float>(dims, NULL, MNN::Tensor::TENSORFLOW);
+        auto tensor = MNN::Tensor::create<float>(dims, NULL, MNN::Tensor::CAFFE);
         auto p_tensor   = tensor->host<float>();
         auto size   = tensor->size();
         std::memcpy(p_tensor, mel.data(), size);
