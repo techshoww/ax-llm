@@ -19,7 +19,7 @@
 #include "cqdm.h"
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
-#include "ax_sys_api.h"
+#include "axcl_manager.h"
 #include "MNN/MNNDefine.h"
 #include "MNN/MNNForwardType.h"
 #include "MNN/Interpreter.hpp"
@@ -27,6 +27,7 @@
 class Token2Wav
 {
 public:
+    int devid = 0;
     int flow_embed_num = 6561;
     int flow_embed_size = 512;
     int token_mel_ratio = 2;
@@ -122,63 +123,69 @@ public:
             return false;
         }
 
-        ret = flow_encoder_28.init((model_dir+"/flow_encoder_28.axmodel").c_str(), false);
+        if (axcl_Init(devid) != 0)
+        {
+            ALOGE("axcl_Init(%d) failed", devid);
+            return false;
+        }
+
+        ret = flow_encoder_28.init((model_dir+"/flow_encoder_28.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_encoder_28.axmodel").c_str());
             return false;
         }
 
-        ret = flow_encoder_53.init((model_dir+"/flow_encoder_53.axmodel").c_str(), false);
+        ret = flow_encoder_53.init((model_dir+"/flow_encoder_53.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_encoder_53.axmodel").c_str());
             return false;
         }
 
-        ret = flow_encoder_78.init((model_dir+"/flow_encoder_78.axmodel").c_str(), false);
+        ret = flow_encoder_78.init((model_dir+"/flow_encoder_78.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_encoder_78.axmodel").c_str());
             return false;
         }
 
-        ret = flow_encoder_50_final.init((model_dir+"/flow_encoder_50_final.axmodel").c_str(), false);
+        ret = flow_encoder_50_final.init((model_dir+"/flow_encoder_50_final.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_encoder_50_final.axmodel").c_str());
             return false;
         }
 
-        ret = flow_estimator_200.init((model_dir+"/flow_estimator_200.axmodel").c_str(), false);
+        ret = flow_estimator_200.init((model_dir+"/flow_estimator_200.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_estimator_200.axmodel").c_str());
             return false;
         }
 
-        ret = flow_estimator_250.init((model_dir+"/flow_estimator_250.axmodel").c_str(), false);
+        ret = flow_estimator_250.init((model_dir+"/flow_estimator_250.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_estimator_250.axmodel").c_str());
             return false;
         }
 
-        ret = flow_estimator_300.init((model_dir+"/flow_estimator_300.axmodel").c_str(), false);
+        ret = flow_estimator_300.init((model_dir+"/flow_estimator_300.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/flow_estimator_300.axmodel").c_str());
             return false;
         }
 
-        ret = hift_p2_50_first.init((model_dir+"/hift_p2_50_first.axmodel").c_str(), false);
+        ret = hift_p2_50_first.init((model_dir+"/hift_p2_50_first.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_50_first.axmodel").c_str());
             return false;
         }
 
-        ret = hift_p2_58.init((model_dir+"/hift_p2_58.axmodel").c_str(), false);
+        ret = hift_p2_58.init((model_dir+"/hift_p2_58.axmodel").c_str(), devid);
         if (ret != 0)
         {
             ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_58.axmodel").c_str());
@@ -209,7 +216,8 @@ public:
 
         sess_hift_p1_58 = hift_p1_58->createSession(config);
 
-        ALOGI("Token2Wav init ok");
+        int remain_cmm = axcl_GetCMMRemain(devid);
+        ALOGI("Token2Wav init ok, remain_cmm(%d MB)", remain_cmm);
         return true;
     }
 
@@ -225,6 +233,7 @@ public:
         hift_p2_50_first.release();
         hift_p2_58.release();
         flow_embed_selector.Deinit();
+        axcl_Exit(devid);
     }
 
     int SpeechToken2Embeds(std::vector<int> & token_ids,  std::vector<float> &token_embeds)
@@ -272,36 +281,41 @@ public:
             return -1;
         }
 
-        void * p = model->get_input("token_embedding").pVirAddr;
-        memcpy(p, token_embeds.data(), token_embeds.size() * sizeof(float));
-        p = model->get_input("prompt_feat").pVirAddr;
-        memcpy(p, prompt_feat.data(), prompt_feat.size() * sizeof(float));
-        p = model->get_input("embedding").pVirAddr;
-        memcpy(p, spk_embeds.data(), spk_embeds.size() * sizeof(float));
+        void * p = (void *)model->get_input("token_embedding").phyAddr;
+        axcl_Memcpy(p, token_embeds.data(), token_embeds.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("prompt_feat").phyAddr;
+        axcl_Memcpy(p, prompt_feat.data(), prompt_feat.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("embedding").phyAddr;
+        axcl_Memcpy(p, spk_embeds.data(), spk_embeds.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
 
         model->inference();
 
-        
         auto &output_mu = model->get_output("mu");
         if(mu.empty())
         {
             mu.resize(output_mu.nSize / sizeof(float));
         }
-        memcpy(mu.data(), output_mu.pVirAddr, output_mu.nSize);
+        // axcl_Memcpy(mu.data(), (void *)output_mu.phyAddr, output_mu.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_mu.pVirAddr, (void *)output_mu.phyAddr, output_mu.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        memcpy(mu.data(), (void *)output_mu.pVirAddr, output_mu.nSize);
 
         auto &output_spks = model->get_output("spks");
         if(spks.empty())
         {
             spks.resize(output_spks.nSize / sizeof(float));
         }
-        memcpy(spks.data(), output_spks.pVirAddr, output_spks.nSize);
+        // axcl_Memcpy(spks.data(), (void *)output_spks.phyAddr, output_spks.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_spks.pVirAddr, (void *)output_spks.phyAddr, output_spks.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        memcpy(spks.data(), (void *)output_spks.pVirAddr, output_spks.nSize);
 
         auto &output_cond = model->get_output("cond");
         if(cond.empty())
         {
             cond.resize(output_cond.nSize / sizeof(float));
         }
-        memcpy(cond.data(), output_cond.pVirAddr, output_cond.nSize);
+        // axcl_Memcpy(cond.data(), (void *)output_cond.phyAddr, output_cond.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_cond.pVirAddr, (void *)output_cond.phyAddr, output_cond.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        mempcpy(cond.data(), (void *)output_cond.pVirAddr, output_cond.nSize);
 
         return 0;
     }
@@ -324,18 +338,18 @@ public:
             return -1;
         }
 
-        void * p = model->get_input("x").pVirAddr;
-        memcpy(p, x.data(), x.size() * sizeof(float));
-        p = model->get_input("mask").pVirAddr;
-        memcpy(p, mask.data(), mask.size() * sizeof(float));
-        p = model->get_input("t").pVirAddr;
-        memcpy(p, t.data(), t.size() * sizeof(float));
-        p = model->get_input("mu").pVirAddr;
-        memcpy(p, mu.data(), mu.size() * sizeof(float));
-        p = model->get_input("spks").pVirAddr;
-        memcpy(p, spks.data(), spks.size() * sizeof(float));
-        p = model->get_input("cond").pVirAddr;
-        memcpy(p, cond.data(), cond.size() * sizeof(float));
+        void * p = (void *)model->get_input("x").phyAddr;
+        axcl_Memcpy(p, x.data(), x.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("mask").phyAddr;
+        axcl_Memcpy(p, mask.data(), mask.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("t").phyAddr;
+        axcl_Memcpy(p, t.data(), t.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("mu").phyAddr;
+        axcl_Memcpy(p, mu.data(), mu.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("spks").phyAddr;
+        axcl_Memcpy(p, spks.data(), spks.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+        p = (void *)model->get_input("cond").phyAddr;
+        axcl_Memcpy(p, cond.data(), cond.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
 
         model->inference();
 
@@ -344,7 +358,9 @@ public:
         {
             dphi_dt.resize(output_dphi_dt.nSize / sizeof(float));
         }
-        memcpy(dphi_dt.data(), output_dphi_dt.pVirAddr, output_dphi_dt.nSize);
+        // axcl_Memcpy(dphi_dt.data(), (void *)output_dphi_dt.phyAddr, output_dphi_dt.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_dphi_dt.pVirAddr, (void *)output_dphi_dt.phyAddr, output_dphi_dt.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        memcpy(dphi_dt.data(), (void *)output_dphi_dt.pVirAddr, output_dphi_dt.nSize);
 
         return 0;
     }
@@ -382,24 +398,30 @@ public:
         auto inputTensor = model_p1->getSessionInput(sess_p1, nullptr);
         inputTensor->copyFromHostTensor(tensor);
         
-        model_p1->runSession(sess_p1);
+        int ret = model_p1->runSession(sess_p1);
+        if(ret != 0){
+            ALOGE("failed, err code:%d", ret);
+            return ret;
+        }
         
         MNN::Tensor *p_out  = model_p1->getSessionOutput(sess_p1, "s");
         MNN::Tensor out_host(p_out, p_out->getDimensionType());
         p_out->copyToHostTensor(&out_host);
         
         auto p_s = out_host.host<float>();
+        ALOGI("p_s %d",p_s);
 
-        void * p = model_p2->get_input("s").pVirAddr;
-        memcpy(p, p_s, len * 480 * sizeof(float));
-        
-        p = model_p2->get_input("mel").pVirAddr;
-        memcpy(p, mel.data(), mel.size() * sizeof(float));
+        auto out_s = model_p2->get_input("s");
+        memcpy(out_s.pVirAddr, (void *)p_s, len * 480 * sizeof(float));
+        axcl_Memcpy((void *)out_s.phyAddr, (void *)out_s.pVirAddr, len * 480 * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
+
+        void * p = (void *)model_p2->get_input("mel").phyAddr;
+        axcl_Memcpy(p, mel.data(), mel.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
         
         if(!cache_source.empty())
         {
-            p = model_p2->get_input("hift_cache_source").pVirAddr;
-            memcpy(p, cache_source.data(), cache_source.size() * sizeof(float));
+            p = (void *)model_p2->get_input("hift_cache_source").phyAddr;
+            axcl_Memcpy(p, cache_source.data(), cache_source.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, devid);
         }
         
         model_p2->inference();
@@ -409,15 +431,18 @@ public:
         {
             tts_speech.resize(output_speech.nSize / sizeof(float));
         }
-        memcpy(tts_speech.data(), output_speech.pVirAddr, output_speech.nSize);
+        // axcl_Memcpy(tts_speech.data(), (void *)output_speech.phyAddr, output_speech.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_speech.pVirAddr, (void *)output_speech.phyAddr, output_speech.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        memcpy(tts_speech.data(), (void *)output_speech.pVirAddr, output_speech.nSize);
 
         auto &output_source = model_p2->get_output(1);
         if(tts_source.empty() || tts_source.size() != output_source.nSize / sizeof(float))
         {
             tts_source.resize(output_source.nSize / sizeof(float));
         }
-        memcpy(tts_source.data(), output_source.pVirAddr, output_source.nSize);
-        
+        // axcl_Memcpy(tts_source.data(), (void *)output_source.phyAddr, output_source.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        axcl_Memcpy((void *)output_source.pVirAddr, (void *)output_source.phyAddr, output_source.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, devid);
+        memcpy(tts_source.data(), (void *)output_source.pVirAddr, output_source.nSize);
         return 0;
     }
 

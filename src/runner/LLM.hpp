@@ -18,9 +18,9 @@
 #include "cqdm.h"
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
-#include "ax_sys_api.h"
 #include "utils/sampling.hpp"
 #include "utils/utils.hpp"
+#include "axcl_manager.h"
 
 using SpeechToken = int;
 // The container for speech tokens. std::deque is efficient for front/back operations.
@@ -72,6 +72,7 @@ struct LLMAttrType
     LLMRuningCallback runing_callback = nullptr;
     void *reserve = nullptr;
 
+    std::vector<int> dev_ids = {0, 1, 2, 3};
 };
 
 class LLM
@@ -101,6 +102,32 @@ private:
     bool b_stop = false;
     int min_len = -1;
     int max_len = -1;
+
+    std::vector<int> distributeModels(int cardCount, int modelCount)
+    {
+        std::vector<int> cardAssignments(modelCount);
+        if (cardCount <= 0 || modelCount <= 0)
+            return cardAssignments; // 返回空的或未初始化的 vector
+
+        // 计算每张卡至少分配的模型数量
+        int baseCount = modelCount / cardCount;
+        // 计算余数，多出的模型会依次分配给前面的卡
+        int remainder = modelCount % cardCount;
+
+        int startIndex = 0;
+        for (int card = 0; card < cardCount; ++card)
+        {
+            // 如果当前卡号在前 remainder 张卡中，则多分配一个模型
+            int modelsOnThisCard = baseCount + (card < remainder ? 1 : 0);
+            for (int i = 0; i < modelsOnThisCard; ++i)
+            {
+                cardAssignments[startIndex + i] = card;
+            }
+            startIndex += modelsOnThisCard;
+        }
+
+        return cardAssignments;
+    }
 
 public:
     bool Init(LLMAttrType attr)
@@ -133,82 +160,64 @@ public:
         }
         update_cqdm(&cqdm, 1, "count", "embed_selector init ok");
 
-        llama_layers.resize(attr.axmodel_num);
-        // prefill_layers.resize(attr.prefill_axmodel_num);
-        ALOGI("attr.axmodel_num:%d",attr.axmodel_num);
-        char axmodel_path[1024];
-        for (int i = 0; i < attr.axmodel_num; i++)
+        for (auto &devid : _attr.dev_ids)
         {
-            sprintf(axmodel_path, attr.template_filename_axmodel.c_str(), i);
-            llama_layers[i].filename = axmodel_path;
-
-            if (!attr.b_dynamic_load_axmodel_layer)
+            if (axcl_Init(devid) != 0)
             {
-                int ret = llama_layers[i].layer.init(llama_layers[i].filename.c_str(), false);
-                if (ret != 0)
-                {
-                    ALOGE("init axmodel(%s) failed", llama_layers[i].filename.c_str());
-                    return false;
-                }
-                int remain_cmm = get_remaining_cmm_size();
-                sprintf(axmodel_path, "init %d axmodel ok,remain_cmm(%d MB)", i, remain_cmm);
-                update_cqdm(&cqdm, i + 2, "count", axmodel_path);
-            }
-            else
-            {
-                if (!attr.b_use_mmap_load_layer)
-                {
-                    if (!read_file(llama_layers[i].filename, llama_layers[i].layer_buffer_vec))
-                    {
-                        ALOGE("read_file(%s) failed", llama_layers[i].filename.c_str());
-                        return false;
-                    }
-                }
-                else
-                {
-                    llama_layers[i].layer_buffer.open_file(llama_layers[i].filename.c_str());
-                }
-
-                sprintf(axmodel_path, "read_file %s ok", llama_layers[i].filename.c_str());
-                update_cqdm(&cqdm, i + 2, "count", axmodel_path);
+                ALOGE("axcl_Init(%d) failed", devid);
+                return false;
             }
         }
 
-        int ret = llama_post.init(attr.filename_post_axmodel.c_str(), false);
+        llama_layers.resize(attr.axmodel_num);
+        // prefill_layers.resize(attr.prefill_axmodel_num);
+        ALOGI("attr.axmodel_num:%d",attr.axmodel_num);
+
+        auto dev_assignments = distributeModels(_attr.dev_ids.size(), attr.axmodel_num);
+        std::vector<int> rets(attr.axmodel_num);
+        std::atomic<int> process_idx = 2;
+
+#pragma omp parallel for
+        
+        for (int i = 0; i < attr.axmodel_num; i++)
+        {
+            char axmodel_path[1024];
+            sprintf(axmodel_path, attr.template_filename_axmodel.c_str(), i);
+            llama_layers[i].filename = axmodel_path;
+
+            int ret = llama_layers[i].layer.init(llama_layers[i].filename.c_str(), _attr.dev_ids[dev_assignments[i]]);
+            rets[i] = ret;
+            int remain_cmm = axcl_GetCMMRemain(_attr.dev_ids[dev_assignments[i]]);
+            sprintf(axmodel_path, "init %d axmodel ok,devid(%d) remain_cmm(%d MB)", i, _attr.dev_ids[dev_assignments[i]], remain_cmm);
+            update_cqdm(&cqdm, process_idx++, "count", axmodel_path);
+        }
+
+        for (int i = 0; i < attr.axmodel_num; i++)
+        {
+            if (rets[i] != 0)
+            {
+                ALOGE("init axmodel(%s) failed", llama_layers[i].filename.c_str());
+                return false;
+            }
+        }
+
+        int ret = llama_post.init(attr.filename_post_axmodel.c_str(), llama_layers[llama_layers.size() - 1].layer.get_devid());
         if (ret != 0)
         {
             ALOGE("init post axmodel(%s) failed", attr.filename_post_axmodel.c_str());
             return false;
         }
-        ret = llm_decoder.init(attr.filename_decoder_axmodel.c_str(), false);
+        ret = llm_decoder.init(attr.filename_decoder_axmodel.c_str(), llama_layers[llama_layers.size() - 2].layer.get_devid());
         if (ret != 0)   
         {
             ALOGE("init llm decoder axmodel(%s) failed", attr.filename_decoder_axmodel.c_str());
             return false;
         }
 
-        int remain_cmm = get_remaining_cmm_size();
+        int remain_cmm = axcl_GetCMMRemain(llama_post.get_devid());
+        char axmodel_path[1024];
         sprintf(axmodel_path, "init post axmodel ok,remain_cmm(%d MB)", remain_cmm);
         update_cqdm(&cqdm, attr.axmodel_num + 2, "count", axmodel_path);
-
-        if (attr.b_dynamic_load_axmodel_layer)
-        {
-            // 加载第一层获取shape信息
-            auto &layer = llama_layers[0];
-            int ret;
-            if (_attr.b_use_mmap_load_layer)
-            {
-                ret = layer.layer.init((char *)layer.layer_buffer.data(), layer.layer_buffer.size());
-            }
-            else
-            {
-                ret = layer.layer.init(layer.layer_buffer_vec.data(), layer.layer_buffer_vec.size());
-            }
-            if (ret != 0)
-            {
-                ALOGE("init axmodel(%s) failed", layer.filename.c_str());
-            }
-        }
 
         {
             _attr.max_token_len = llama_layers[0].layer.get_input("mask").nSize / sizeof(unsigned short) - 1;
@@ -235,17 +244,67 @@ public:
             }
             _attr.prefill_max_token_num = _attr.prefill_max_kv_cache_num_grp[_attr.prefill_max_kv_cache_num_grp.size() - 1];
             ALOGI("prefill_max_token_num : %d", _attr.prefill_max_token_num);
-        }
-        if (attr.b_dynamic_load_axmodel_layer)
-        {
-            for(int i=0; i<attr.axmodel_num;i++)
+        
+            bfloat16 bf16 = -65536.f;
             {
-                auto &layer = llama_layers[i];
-                layer.layer.deinit();
+                int prefill_split_num = _attr.prefill_max_token_num / _attr.prefill_token_num;
+                std::vector<std::vector<unsigned short>> mask_p(prefill_split_num);
+                for (size_t p = 0; p < prefill_split_num; p++)
+                {
+                    std::vector<unsigned short> &mask_tmp = mask_p[p];
+                    mask_tmp.resize((p + 1) * _attr.prefill_token_num * _attr.prefill_token_num, bf16.data);
+
+                    size_t i = 0;
+                    for (size_t t = p * _attr.prefill_token_num; t < (p + 1) * _attr.prefill_token_num; t++)
+                    {
+                        // if (t < input_embed_num)
+                        {
+                            for (size_t j = 0; j < p * _attr.prefill_token_num + i + 1; j++)
+                                mask_tmp[i * ((p + 1) * _attr.prefill_token_num) + j] = 0;
+                        }
+                        i++;
+                    }
+                }
+
+                for (size_t p = 0; p < prefill_split_num; p++)
+                {
+                    int prefill_grpid_tmp = p + 1;
+                    std::vector<unsigned short> &mask_tmp = mask_p[p];
+                    for (unsigned int m = 0; m < _attr.axmodel_num; m++)
+                    {
+                        auto &layer = llama_layers[m];
+
+                        auto &input_indices = layer.layer.get_input(prefill_grpid_tmp, "indices");
+                        unsigned int *input_indices_ptr = (unsigned int *)input_indices.pVirAddr;
+
+                        for (unsigned int i = 0; i < _attr.prefill_token_num; i++)
+                        {
+                            input_indices_ptr[i] = p * _attr.prefill_token_num + i;
+                        }
+                        axcl_Memcpy((void *)input_indices.phyAddr, input_indices_ptr, _attr.prefill_token_num * sizeof(unsigned int), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
+
+                        auto &input_mask = layer.layer.get_input(prefill_grpid_tmp, "mask");
+                        // memcpy(input_mask.pVirAddr, mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short));
+                        axcl_Memcpy((void *)input_mask.phyAddr, mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
+                    }
+                }
             }
         }
+        
+        std::vector<int> v_remain_cmm;
+        for (int i = 0; i < _attr.dev_ids.size(); i++)
+        {
+            v_remain_cmm.push_back(axcl_GetCMMRemain(_attr.dev_ids[i]));
+        }
+        printf(MACRO_PURPLE "________________________\n");
+        printf("|%6s|%15s|\n", "ID", "remain cmm(MB)");
+        printf("========================\n");
+        for (int i = 0; i < _attr.dev_ids.size(); i++)
+        {
+            printf("|%6d|%15d|\n", _attr.dev_ids[i], v_remain_cmm[i]);
+        }
+        printf("¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯\n" MACRO_END);
 
-        // Reset();
         ALOGI("LLM init ok");
         return true;
     }
@@ -266,6 +325,8 @@ public:
         embed_selector.Deinit();
         llm_embed_selector.Deinit();
         speech_embed_selector.Deinit();
+        for (auto &devid : _attr.dev_ids)
+            axcl_Exit(devid);
     }
 
     void Stop()
@@ -458,24 +519,6 @@ public:
 
                 auto &layer = llama_layers[m];
 
-                if (_attr.b_dynamic_load_axmodel_layer)
-                {
-                    int ret;
-                    if (_attr.b_use_mmap_load_layer)
-                    {
-                        ret = layer.layer.init((char *)layer.layer_buffer.data(), layer.layer_buffer.size());
-                    }
-                    else
-                    {
-                        ret = layer.layer.init(layer.layer_buffer_vec.data(), layer.layer_buffer_vec.size());
-                    }
-                    if (ret != 0)
-                    {
-                        ALOGE("init axmodel(%s) failed", layer.filename.c_str());
-                    }
-                }
-
-
                 // set indices
                 auto &input_indices = layer.layer.get_input(_attr.prefill_grpid, "indices");
                 unsigned int *input_indices_ptr = (unsigned int *)input_indices.pVirAddr;
@@ -491,13 +534,15 @@ public:
                         }
                     }
                 }    
+                axcl_Memcpy((void *)input_indices.phyAddr, input_indices_ptr, input_indices.nSize, AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
 
                 // set mask
                 auto &input_mask = layer.layer.get_input(_attr.prefill_grpid, "mask");
-                memcpy((void *)input_mask.pVirAddr, (void *)mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short));
+                axcl_Memcpy((void *)input_mask.phyAddr, (void *)mask_tmp.data(), mask_tmp.size() * sizeof(unsigned short), AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
+
                 // set input
                 auto &input_input = layer.layer.get_input(_attr.prefill_grpid, "input");
-                memcpy((void *)input_input.pVirAddr, embed_tmp.data(), embed_tmp.size() * sizeof(unsigned short));
+                axcl_Memcpy((void *)input_input.phyAddr, embed_tmp.data(), embed_tmp.size() * sizeof(unsigned short), AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
 
                 layer.layer.inference(_attr.prefill_grpid);
 
@@ -509,39 +554,34 @@ public:
 
                 int kv_offset = (_attr.precompute_len + p * _attr.prefill_token_num) * _attr.kv_cache_size;
 
-                memcpy((unsigned short *)input_decoder_k_cache.pVirAddr + kv_offset,
-                        (void *)output_k_cache.pVirAddr,
-                            sizeof(unsigned short) * input_num_token * _attr.kv_cache_size);
+                axcl_Memcpy((unsigned short *)input_decoder_k_cache.phyAddr + kv_offset,
+                            (void *)output_k_cache.phyAddr,
+                            sizeof(unsigned short) * input_num_token * _attr.kv_cache_size,
+                            AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
 
-                memcpy((unsigned short *)input_decoder_v_cache.pVirAddr + kv_offset,
-                            (void *)output_v_cache.pVirAddr,
-                            sizeof(unsigned short) * input_num_token * _attr.kv_cache_size
-                            );
+                axcl_Memcpy((unsigned short *)input_decoder_v_cache.phyAddr + kv_offset,
+                            (void *)output_v_cache.phyAddr,
+                            sizeof(unsigned short) * input_num_token * _attr.kv_cache_size,
+                            AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
 
                 for(int gid=_attr.prefill_grpid+1; gid<prefill_split_num+1; gid++){
                     auto &input_prefill_k_cache = layer.layer.get_input(gid, "K_cache");
-                    memcpy((unsigned short *)input_prefill_k_cache.pVirAddr + kv_offset,
-                                (void *)output_k_cache.pVirAddr,
-                                sizeof(unsigned short) * input_num_token * _attr.kv_cache_size
-                                );
+                    axcl_Memcpy((unsigned short *)input_prefill_k_cache.phyAddr + kv_offset,
+                                (void *)output_k_cache.phyAddr,
+                                sizeof(unsigned short) * input_num_token * _attr.kv_cache_size,
+                                AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
                 }
 
                 for(int gid=_attr.prefill_grpid+1; gid<prefill_split_num+1; gid++){
                     auto &input_prefill_v_cache = layer.layer.get_input(gid, "V_cache");
-                    memcpy((unsigned short *)input_prefill_v_cache.pVirAddr + kv_offset,
-                                (void *)output_v_cache.pVirAddr,
-                                sizeof(unsigned short) * input_num_token * _attr.kv_cache_size
-                                );
+                    axcl_Memcpy((unsigned short *)input_prefill_v_cache.phyAddr + kv_offset,
+                                (void *)output_v_cache.phyAddr,
+                                sizeof(unsigned short) * input_num_token * _attr.kv_cache_size,
+                                AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
                 }
 
                 auto &output = layer.layer.get_output(_attr.prefill_grpid, "output");
-                memcpy(embed_tmp.data(), (void *)output.pVirAddr, embed_tmp.size() * sizeof(unsigned short) );
-
-                if (_attr.b_dynamic_load_axmodel_layer)
-                {
-                    layer.layer.deinit();
-                }
-
+                axcl_Memcpy(embed_tmp.data(), (void *)output.phyAddr, embed_tmp.size() * sizeof(unsigned short), AXCL_MEMCPY_DEVICE_TO_HOST, layer.layer.get_devid());
             }
             if (p == (prefill_split_num - 1))
             {
@@ -559,16 +599,12 @@ public:
 
             // post process
             auto &input = llama_post.get_input(0);
-            memcpy((void *)input.pVirAddr, embed.data(), embed.size() * sizeof(unsigned short));
+            axcl_Memcpy((void *)input.phyAddr, embed.data(), embed.size() * sizeof(unsigned short), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, llama_post.get_devid());
             llama_post.inference();
-            if (_attr.b_use_topk)
-            {
-                AX_SYS_MinvalidateCache(llama_post.get_output("indices").phyAddr, llama_post.get_output("indices").pVirAddr, llama_post.get_output("indices").nSize);
-                max_index = *(int *)llama_post.get_output("indices").pVirAddr;
-            }
-            else
+           
             {
                 auto &output_post = llama_post.get_output("output_norm");           // 1 means get rmsnorm output
+                axcl_Memcpy(output_post.pVirAddr, (void *)output_post.phyAddr, output_post.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, llama_post.get_devid());
                 unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                 std::vector<float> logits(output_post.nSize/sizeof(unsigned short));
                 for (int i = 0; i < output_post.nSize/sizeof(unsigned short); i++)
@@ -578,13 +614,12 @@ public:
                 }
                 
                 auto & input_decoder = llm_decoder.get_input(0);
-                memcpy(input_decoder.pVirAddr, logits.data(), logits.size()*sizeof(float));
+                axcl_Memcpy((void *)input_decoder.phyAddr, logits.data(), logits.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, llm_decoder.get_devid());
+
                 llm_decoder.inference();
 
                 auto & output_decoder = llm_decoder.get_output(0);
-                float *post_decoder = (float *)output_decoder.pVirAddr;
-
-                memcpy(scores.data(), post_decoder, output_decoder.nSize);
+                axcl_Memcpy(scores.data(), (void *)output_decoder.phyAddr, output_decoder.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, llm_decoder.get_devid());
                 max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_embed_num-3, true);
             }
             next_token = max_index;
@@ -618,7 +653,7 @@ public:
             }
 
             speech_embed_selector.getByIndex(next_token, embed.data());
-            memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").pVirAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize);
+            axcl_Memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").phyAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize, AXCL_MEMCPY_HOST_TO_DEVICE, llama_layers[0].layer.get_devid());
 
             {
                 std::vector<float> float_embeds(embed.size());
@@ -638,49 +673,56 @@ public:
 
                 auto &layer = llama_layers[m];
 
-                if (_attr.b_dynamic_load_axmodel_layer)
-                {
-                    int ret;
-                    if (_attr.b_use_mmap_load_layer)
-                    {
-                        ret = layer.layer.init((char *)layer.layer_buffer.data(), layer.layer_buffer.size());
-                    }
-                    else
-                    {
-                        ret = layer.layer.init(layer.layer_buffer_vec.data(), layer.layer_buffer_vec.size());
-                    }
-                    if (ret != 0)
-                    {
-                        ALOGE("init axmodel(%s) failed", layer.filename.c_str());
-                    }
-                }
-
                 auto &input_k_cache = layer.layer.get_input(decode_grpid, "K_cache");
                 auto &input_v_cache = layer.layer.get_input(decode_grpid, "V_cache");
 
                 auto &input_indices = layer.layer.get_input(decode_grpid, "indices");
-                memcpy((void *)input_indices.pVirAddr, &indices, sizeof(indices));
+                axcl_Memcpy((void *)input_indices.phyAddr, &indices, sizeof(indices), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
 
                 auto &input_mask = layer.layer.get_input(decode_grpid, "mask");
-                memcpy((void *)input_mask.pVirAddr, mask.data(), mask.size() * sizeof(unsigned short));
+                axcl_Memcpy((void *)input_mask.phyAddr, mask.data(), mask.size() * sizeof(unsigned short), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, layer.layer.get_devid());
 
                 layer.layer.inference(decode_grpid);
 
                 auto &output_k_cache = layer.layer.get_output(decode_grpid, "K_cache_out");
-                memcpy((unsigned short *)input_k_cache.pVirAddr + indices * _attr.kv_cache_size, (void *)output_k_cache.pVirAddr, output_k_cache.nSize);
+                axcl_Memcpy((unsigned short *)input_k_cache.phyAddr + indices * _attr.kv_cache_size, (void *)output_k_cache.phyAddr, output_k_cache.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
 
                 auto &output_v_cache = layer.layer.get_output(decode_grpid, "V_cache_out");
-                memcpy((unsigned short *)input_v_cache.pVirAddr + indices * _attr.kv_cache_size, (void *)output_v_cache.pVirAddr, output_v_cache.nSize);
+                axcl_Memcpy((unsigned short *)input_v_cache.phyAddr + indices * _attr.kv_cache_size, (void *)output_v_cache.phyAddr, output_v_cache.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
 
                 if (m == _attr.axmodel_num - 1)
                 {
-                    memcpy((void *)llama_post.get_input(0).pVirAddr,
-                           (void *)layer.layer.get_output(decode_grpid, "output").pVirAddr, llama_post.get_input(0).nSize);
+                    if (llama_post.get_devid() == layer.layer.get_devid())
+                    {
+                        axcl_Memcpy((void *)llama_post.get_input(0).phyAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").phyAddr, llama_post.get_input(0).nSize, AXCL_MEMCPY_DEVICE_TO_DEVICE, llama_post.get_devid());
+                    }
+                    else
+                    {
+                        axcl_Memcpy((void *)layer.layer.get_output(decode_grpid, "output").pVirAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").phyAddr, layer.layer.get_output(decode_grpid, "output").nSize, AXCL_MEMCPY_DEVICE_TO_HOST, layer.layer.get_devid());
+
+                        axcl_Memcpy((void *)llama_post.get_input(0).phyAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").pVirAddr, llama_post.get_input(0).nSize, AXCL_MEMCPY_HOST_TO_DEVICE, llama_post.get_devid());
+                    }
                 }
                 else if (m < _attr.axmodel_num - 1)
                 {
-                    memcpy((void *)llama_layers[m + 1].layer.get_input(decode_grpid, "input").pVirAddr,
-                           (void *)layer.layer.get_output(decode_grpid, "output").pVirAddr, layer.layer.get_input(decode_grpid, "input").nSize);
+                    
+                    if (llama_layers[m + 1].layer.get_devid() == layer.layer.get_devid())
+                    {
+                        axcl_Memcpy((void *)llama_layers[m + 1].layer.get_input(decode_grpid, "input").phyAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").phyAddr, layer.layer.get_input(decode_grpid, "input").nSize, AXCL_MEMCPY_DEVICE_TO_DEVICE, layer.layer.get_devid());
+                    }
+                    else
+                    {
+                        axcl_Memcpy((void *)layer.layer.get_output(decode_grpid, "output").pVirAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").phyAddr, layer.layer.get_output(decode_grpid, "output").nSize, AXCL_MEMCPY_DEVICE_TO_HOST, layer.layer.get_devid());
+
+                        axcl_Memcpy((void *)llama_layers[m + 1].layer.get_input(decode_grpid, "input").phyAddr,
+                                    (void *)layer.layer.get_output(decode_grpid, "output").pVirAddr, layer.layer.get_input(decode_grpid, "input").nSize, AXCL_MEMCPY_HOST_TO_DEVICE, llama_layers[m + 1].layer.get_devid());
+                    }
+                    
                 }
             }
 
@@ -689,6 +731,7 @@ public:
                 llama_post.inference();
 
                 auto &output_post = llama_post.get_output("output_norm");           // 1 means get rmsnorm output
+                axcl_Memcpy(output_post.pVirAddr, (void *)output_post.phyAddr, output_post.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, llama_post.get_devid());
                 unsigned short *post_out = (unsigned short *)output_post.pVirAddr;
                 std::vector<float> logits(output_post.nSize/sizeof(unsigned short));
                 for (int i = 0; i < output_post.nSize/sizeof(unsigned short); i++)
@@ -698,13 +741,12 @@ public:
                 }
 
                 auto & input_decoder = llm_decoder.get_input(0);
-                memcpy(input_decoder.pVirAddr, logits.data(), logits.size()*sizeof(float));
+                axcl_Memcpy((void *)input_decoder.phyAddr, logits.data(), logits.size() * sizeof(float), axclrtMemcpyKind::AXCL_MEMCPY_HOST_TO_DEVICE, llm_decoder.get_devid());
+        
                 llm_decoder.inference();
 
                 auto & output_decoder = llm_decoder.get_output(0);
-                float *post_decoder = (float *)output_decoder.pVirAddr;
-                
-                memcpy(scores.data(), post_decoder, output_decoder.nSize);
+                axcl_Memcpy(scores.data(), (void *)output_decoder.phyAddr, output_decoder.nSize, axclrtMemcpyKind::AXCL_MEMCPY_DEVICE_TO_HOST, llm_decoder.get_devid());
                 
                 bool ignore_eos = false;
                 if(indices < min_len)
@@ -762,8 +804,8 @@ public:
         {
             for (size_t j = 0; j < llama_layers[i].layer.get_num_input_groups(); j++)
             {
-                memset((void *)llama_layers[i].layer.get_input(j, "K_cache").pVirAddr, 0, llama_layers[i].layer.get_input(j, "K_cache").nSize);
-                memset((void *)llama_layers[i].layer.get_input(j, "V_cache").pVirAddr, 0, llama_layers[i].layer.get_input(j, "V_cache").nSize);
+                axcl_Memset((void *)llama_layers[i].layer.get_input(j, "K_cache").phyAddr, 0, llama_layers[i].layer.get_input(j, "K_cache").nSize, llama_layers[i].layer.get_devid());
+                axcl_Memset((void *)llama_layers[i].layer.get_input(j, "V_cache").phyAddr, 0, llama_layers[i].layer.get_input(j, "V_cache").nSize, llama_layers[i].layer.get_devid());
             }
         }
 

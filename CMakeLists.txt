@@ -18,14 +18,37 @@ add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" CMAKE_SYSTEM_PROCESSOR_LOWER)
+
+if(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86_64" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "amd64" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i386" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i686")
+    set(SYSTEM_ARCH "x86")
+    message(STATUS "Detected x86/x86_64 architecture.")
+elseif(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "aarch64" OR
+       CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "arm64")
+    set(SYSTEM_ARCH "aarch64")
+    message(STATUS "Detected aarch64 architecture.")
+else()
+    set(SYSTEM_ARCH "unknown")
+    message(WARNING "Unknown or unsupported system processor architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 # mnn
-option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) # 明确写出帮助字符串是好习惯
+option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) 
 option(MNN_KLEIDIAI "Enable Kleidiai backend for MNN" OFF)
-option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
+if(SYSTEM_ARCH STREQUAL "x86")
+    option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" ON)
+    option(MNN_AVX512 "Enable AVX512" ON)
+elseif(SYSTEM_ARCH STREQUAL "aarch64")
+    option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
+    option(MNN_AVX512 "Enable AVX512" OFF)
+endif()
 
 set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/MNN)
 add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/MNN)
-
 
 include_directories(third_party/MNN/include/)
 
@@ -59,21 +82,26 @@ link_directories(${BSP_MSP_DIR}/lib)
 # 添加 FLAGS 检查代码是否有明显 bug
 include(overlook.cmake)
 
-include_directories(src)
-include_directories(src/runner)
-include_directories(src/runner/utils)
-
-if(NOT OpenCV_DIR)
-    set(OpenCV_DIR ${CMAKE_SOURCE_DIR}/third_party/libopencv-4.6-aarch64-none/lib/cmake/opencv4)
-endif()
-
 message(STATUS "OPENCV_DIR Path: ${OpenCV_DIR}")
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
+find_package(OpenMP REQUIRED)
+
+include_directories(src)
+include_directories(src/runner)
+include_directories(src/runner/utils)
+
+include_directories(axcl/include)
+link_directories(axcl/lib)
+include_directories(/usr/include/axcl/)
+link_directories(/usr/lib/axcl/)
+
+
 function(build_exec name main_source)
     add_executable(${name} ${main_source}
                     src/runner/ax_model_runner/ax_model_runner_ax650.cpp 
+                    src/runner/utils/axcl_manager.cpp
                     src/runner/utils/memory_utils.cpp 
                     src/runner/utils/cqdm.cpp
                     src/runner/Tokenizer/Tokenizer.cpp
@@ -83,7 +111,7 @@ function(build_exec name main_source)
                     src/runner/utils/slice_3d.tpp
                     )
 
-    target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
+    target_link_libraries(${name} spdlog axcl_pcie_dma axcl_pcie_msg axcl_token axcl_comm axcl_pkg axcl_rt pthread OpenMP::OpenMP_CXX)
     target_link_libraries(${name} ${OpenCV_LIBS})
     target_link_libraries(${name} MNN)
     install(TARGETS ${name} DESTINATION bin)

@@ -16,6 +16,7 @@ rm output*.wav
 --filename_llm_embed "${LLM_DIR}/llm.llm_embedding.float16.bin" \
 --filename_speech_embed "${LLM_DIR}/llm.speech_embedding.float16.bin" \
 --continue 0 \
+--devices "0,1,2" \
 --prompt_files prompt_files \
 --text "君不见黄河之水天上来，奔流到海不复回。君不见高堂明镜悲白发，朝如青丝暮成雪。"
 

@@ -16,7 +16,7 @@
 #include "runner/utils/timer.hpp"
 #include "cmdline.hpp"
 #include "runner/utils/files.hpp"
-
+#include <axcl.h>
 
 static LLM lLaMa;
 static Token2Wav lToken2Wav;
@@ -257,6 +257,7 @@ int main(int argc, char *argv[])
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
     cmd.add<int>("n_timesteps", 'ts', "num of time steps", false, 7);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
+    cmd.add<std::string>("devices", 0, "devices id,for example: \"0,1,2,3\" ", true, "0,1,2,3");
 
     cmd.parse_check(argc, argv);
 
@@ -275,20 +276,46 @@ int main(int argc, char *argv[])
     attr.axmodel_num = cmd.get<int>("axmodel_num");
     std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
     int n_timesteps = cmd.get<int>("n_timesteps");
-    std::string prompt_files = cmd.get<std::string>("prompt_files");
-
     b_continue = cmd.get<bool>("continue");
+    std::string prompt_files = cmd.get<std::string>("prompt_files");
+    auto devices_str = cmd.get<std::string>("devices");
+    std::vector<int> devices;
+    std::stringstream ss(devices_str);
+    std::string item;
+    while (std::getline(ss, item, ','))
+    {
+        devices.push_back(std::stoi(item));
+        ALOGI("device: %d", std::stoi(item));
+    }
+
+    // 分别给 Token2Wav和LLM分配devices
+    lToken2Wav.devid = devices[ devices.size()-1 ];
+    if(devices.size()>1)
+    {
+        attr.dev_ids.assign(devices.begin(), devices.end()-1);
+    }else{
+        attr.dev_ids.assign(devices.begin(), devices.end());
+    }
+    
+    auto ret = axclInit(nullptr);
+    if (0 != ret)
+    {
+        return ret;
+    }
+
 
     if (!lLaMa.Init(attr))
     {
+        axclFinalize();
         return -1;
     }
 
     if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
+        axclFinalize();
         return -1;
     }
-    ALOGI();
+    
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
@@ -357,6 +384,6 @@ int main(int argc, char *argv[])
 
     lLaMa.Deinit();
     lToken2Wav.Deinit();
-
+    axclFinalize();
     return 0;
 }

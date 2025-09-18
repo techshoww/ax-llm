@@ -24,16 +24,16 @@
 
 -  clone 本项目  
     ```shell
-    git clone -b cosyvoice2  https://github.com/AXERA-TECH/ax-llm.git
+    git clone -b cosyvoice2-axcl  https://github.com/AXERA-TECH/ax-llm.git
     cd ax-llm
+    git submodule init
+    git submodule update
     ```
-- clone `ax650n_bsp_sdk` 代码  
+- 编译   
     ```shell
-    git cloen https://github.com/AXERA-TECH/ax650n_bsp_sdk
-    ```
-- 仔细阅读 `build.sh` ，并在 `build.sh` 正确修改 `BSP_MSP_DIR` 变量后(该变量表示`ax650n_bsp_sdk`代码位置)，运行编译脚本  
-    ```shell
-    ./build.sh
+    mkdir build 
+    cd build && cmake ..
+    make install -j4
     ```
 - 正确编译后，`build/install/bin` 目录，应有以下文件（百度网盘中有预编译的可执行程序）
   ```
@@ -145,9 +145,9 @@ text >>
 ##  音频生成速度  
 | Stage | Time |
 |------|------|
-| llm prefill ( input_token_num + prompt_token_num 在 [0,128 ] ) | 104 ms  | 
-| llm prefill ( input_token_num + prompt_token_num 在 [128,256 ] ) | 234 ms  | 
-| Decode  |  21.24 token/s token/s |
+| llm prefill ( input_token_num + prompt_token_num 在 [0,128 ] ) | 260 ms  | 
+| llm prefill ( input_token_num + prompt_token_num 在 [128,256 ] ) | 526 ms  | 
+| Decode  |  12.07 token/s token/s |
 
 ## Reference
 
