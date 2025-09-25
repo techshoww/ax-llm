@@ -373,7 +373,7 @@ int main(int argc, char *argv[])
              {
                 nlohmann::json json = nlohmann::json::parse(req.body);
                 std::string prompt_files = json["prompt_files"];
-
+                ALOGI("prompt_files: %s", prompt_files.c_str());
                 prompt_text_token.clear();
                 prompt_text_embeds.clear();
                 prompt_speech_token.clear();
