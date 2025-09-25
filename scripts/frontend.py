@@ -39,8 +39,8 @@ except ImportError:
 
 import logging
 logging.getLogger('frontend').setLevel(logging.WARNING)
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s %(message)s')
+# logging.basicConfig(level=logging.DEBUG,
+#                     format='%(asctime)s %(levelname)s %(message)s')
 
 class CosyVoiceFrontEnd:
 
@@ -83,8 +83,8 @@ class CosyVoiceFrontEnd:
                 'failed to initialize ttsfrd resource'
             self.frd.set_lang_type('pinyinvg')
         else:
-            self.zh_tn_model = ZhNormalizer(remove_erhua=False, lang="zh", tagger_path=f"{wetext_dir}/zh/tn/tagger.fst", verbalizer_path=f"{wetext_dir}/zh/tn/tagger.fst")
-            self.en_tn_model = EnNormalizer(lang="zh", tagger_path=f"{wetext_dir}/zh/tn/tagger.fst", verbalizer_path=f"{wetext_dir}/zh/tn/tagger.fst")
+            self.zh_tn_model = ZhNormalizer(remove_erhua=False, lang="zh")
+            self.en_tn_model = EnNormalizer(lang="zh")
             self.inflect_parser = inflect.engine()
 
     def _extract_text_token(self, text):
