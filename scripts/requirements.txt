@@ -1,0 +1,8 @@
+openai-whisper==20231117
+transformers
+gradio
+onnxruntime
+torch
+torchaudio
+inflect
+wetext
