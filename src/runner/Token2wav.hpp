@@ -227,6 +227,11 @@ public:
         flow_embed_selector.Deinit();
     }
 
+    void SetTimesteps(int n_timesteps)
+    {
+        init_tspan(n_timesteps);
+    }
+
     int SpeechToken2Embeds(std::vector<int> & token_ids,  std::vector<float> &token_embeds)
     {   
         if(token_embeds.empty() || token_embeds.size() != token_ids.size()* flow_embed_size)
