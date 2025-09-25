@@ -366,7 +366,7 @@ int main(int argc, char *argv[])
                 nlohmann::json json = nlohmann::json::parse(req.body);
                 int n_timesteps = json["timesteps"];
                 ALOGI("timesteps: %d", n_timesteps);
-                lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps);
+                lToken2Wav.SetTimesteps(n_timesteps);
                 res.set_content("ok", "text/plain"); });
 
     svr.Post("/prompt_files", [&](const httplib::Request &req, httplib::Response &res)
