@@ -16,8 +16,11 @@
 #include "runner/utils/timer.hpp"
 #include "cmdline.hpp"
 #include "runner/utils/files.hpp"
-#include <axcl.h>
 
+#include "runner/utils/httplib.h"
+#include "runner/utils/json.hpp"
+
+static httplib::Server svr;
 static LLM lLaMa;
 static Token2Wav lToken2Wav;
 
@@ -34,6 +37,7 @@ void __sigExit(int iSigNo)
 {
     lLaMa.Stop();
     g_stop = true;
+    svr.stop();
     return;
 }
 
@@ -85,9 +89,12 @@ void reset()
     lToken2Wav.reset();
 }
 
+std::string wav_file;
+// std::mutex wav_file_mutex;
+
 int tts(
     // for llm
-    std::string &text,
+    std::string text,
     std::vector<unsigned short> prompt_text_embeds,
     std::vector<unsigned short> prompt_speech_embeds,
     // for flow
@@ -180,6 +187,7 @@ int tts(
                 std::string path = "output_" + std::to_string(i) + ".wav";
 
                 saveVectorAsWavFloat(speech, path, 24000, 1);
+
                 i += 1;
             }
 
@@ -222,6 +230,11 @@ int tts(
         saveVectorAsWavFloat(speech, path, 24000, 1);
         saveVectorAsWavFloat(output, "output.wav", 24000, 1);
 
+        {
+            // std::lock_guard<std::mutex> lock(wav_file_mutex);
+            wav_file = "output.wav";
+        }
+
         ALOGI("tts total use time: %.3f s", time_total.cost() / 1000);
         reset();
         std::cout << "\nVoice generation pipeline completed.\n";
@@ -240,11 +253,11 @@ int main(int argc, char *argv[])
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, __sigExit);
     LLMAttrType attr;
-    std::string text = "君不见黄河之水天上来，奔流到海不复回。君不见高堂明镜悲白发，朝如青丝暮成雪。";
+    // std::string text = "君不见黄河之水天上来，奔流到海不复回。君不见高堂明镜悲白发，朝如青丝暮成雪。";
     bool b_continue = true;
 
     cmdline::parser cmd;
-    cmd.add<std::string>("text", 't', "text", true, text);
+    // cmd.add<std::string>("text", 't', "text", true, text);
     cmd.add<std::string>("token2wav_axmodel_dir", 0, "token2wav axmodel path template", false, "");
     cmd.add<std::string>("template_filename_axmodel", 0, "axmodel path template", false, attr.template_filename_axmodel);
     cmd.add<std::string>("filename_post_axmodel", 0, "post axmodel path", false, attr.filename_post_axmodel);
@@ -258,13 +271,12 @@ int main(int argc, char *argv[])
     cmd.add<bool>("bos", 0, "", false, attr.b_bos);
     cmd.add<bool>("eos", 0, "", false, attr.b_eos);
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
-    cmd.add<int>("n_timesteps", 'ts', "num of time steps", false, 7);
+    cmd.add<int>("n_timesteps", 0, "num of time steps", false, 7);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
-    cmd.add<std::string>("devices", 0, "devices id,for example: \"0,1,2,3\" ", true, "0,1,2,3");
 
     cmd.parse_check(argc, argv);
 
-    text = cmd.get<std::string>("text");
+    // text = cmd.get<std::string>("text");
 
     attr.filename_tokenizer_model = cmd.get<std::string>("filename_tokenizer_model");
     attr.filename_tokens_embed = cmd.get<std::string>("filename_tokens_embed");
@@ -279,46 +291,20 @@ int main(int argc, char *argv[])
     attr.axmodel_num = cmd.get<int>("axmodel_num");
     std::string token2wav_axmodel_dir = cmd.get<std::string>("token2wav_axmodel_dir");
     int n_timesteps = cmd.get<int>("n_timesteps");
-    b_continue = cmd.get<bool>("continue");
     std::string prompt_files = cmd.get<std::string>("prompt_files");
-    auto devices_str = cmd.get<std::string>("devices");
-    std::vector<int> devices;
-    std::stringstream ss(devices_str);
-    std::string item;
-    while (std::getline(ss, item, ','))
-    {
-        devices.push_back(std::stoi(item));
-        ALOGI("device: %d", std::stoi(item));
-    }
 
-    // 分别给 Token2Wav和LLM分配devices
-    lToken2Wav.devid = devices[ devices.size()-1 ];
-    if(devices.size()>1)
-    {
-        attr.dev_ids.assign(devices.begin(), devices.end()-1);
-    }else{
-        attr.dev_ids.assign(devices.begin(), devices.end());
-    }
-    
-    auto ret = axclInit(nullptr);
-    if (0 != ret)
-    {
-        return ret;
-    }
-
+    b_continue = cmd.get<bool>("continue");
 
     if (!lLaMa.Init(attr))
     {
-        axclFinalize();
         return -1;
     }
 
     if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
-        axclFinalize();
         return -1;
     }
-    
+    ALOGI();
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
@@ -339,50 +325,152 @@ int main(int argc, char *argv[])
     lLaMa.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds);
     lToken2Wav.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds_flow);
 
-    if (text.size() > 0)
-    {
-        tts(
-            // for llm
-            text, prompt_text_embeds, prompt_speech_embeds,
-            // for flow
-            prompt_feat, prompt_speech_embeds_flow, spk_embeds);
-    }
-
-    if (b_continue)
-    {
-        printf("Type \"q\" to exit, Ctrl+c to stop current running\n");
-    }
-
-    while (b_continue)
-    {
-        if (g_stop)
+    std::atomic<bool> b_tts_runing = false;
+    std::string text;
+    svr.Post("/tts", [&](const httplib::Request &req, httplib::Response &res)
+             {
+        nlohmann::json json = nlohmann::json::parse(req.body);
+        text = json["text"];
+        ALOGI("tts text: %s", text.c_str());
+        if(b_tts_runing)
         {
-            break;
+            ALOGE("tts is running");
+            res.set_content("tts is running", "text/plain");
+            res.status = 400;
+            return;
         }
 
-        printf("text >> ");
-        fflush(stdout);
-        std::getline(std::cin, text);
-        if (text == "q")
-        {
-            break;
-        }
-        if (text == "")
-        {
-            continue;
-        }
+        std::function<void()> tts_func = [&text, &b_tts_runing, &prompt_text_embeds, &prompt_speech_embeds, &prompt_feat, &prompt_speech_embeds_flow, &spk_embeds]() {
+            
+            b_tts_runing = true;
+            tts(
+                // for llm
+                text, prompt_text_embeds, prompt_speech_embeds,
+                // for flow
+                prompt_feat, prompt_speech_embeds_flow, spk_embeds
+            );
+            b_tts_runing = false;
+        };
+        std::thread tts_thread(tts_func);
+        tts_thread.detach();
+        res.set_content("ok", "text/plain"); });
 
-        fflush(stdout);
+    svr.Post("/stop", [&](const httplib::Request &req, httplib::Response &res)
+             {
+        lLaMa.Stop();
+        g_stop = true;
+        res.status = 200; });
 
-        tts(
-            // for llm
-            text, prompt_text_embeds, prompt_speech_embeds,
-            // for flow
-            prompt_feat, prompt_speech_embeds_flow, spk_embeds);
-    }
+    svr.Post("/timesteps", [&](const httplib::Request &req, httplib::Response &res)
+             {
+                nlohmann::json json = nlohmann::json::parse(req.body);
+                int n_timesteps = json["timesteps"];
+                ALOGI("timesteps: %d", n_timesteps);
+                lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps);
+                res.set_content("ok", "text/plain"); });
+
+    svr.Post("/prompt_files", [&](const httplib::Request &req, httplib::Response &res)
+             {
+                nlohmann::json json = nlohmann::json::parse(req.body);
+                std::string prompt_files = json["prompt_files"];
+
+                prompt_text_token.clear();
+                prompt_text_embeds.clear();
+                prompt_speech_token.clear();
+                prompt_speech_embeds.clear();
+
+                // for flow
+                prompt_feat.clear();
+                prompt_speech_embeds_flow.clear();
+                spk_embeds.clear();
+
+                readtxt(prompt_files + "/prompt_text.txt", prompt_text_token);
+                readtxt(prompt_files + "/llm_prompt_speech_token.txt", prompt_speech_token);
+                readtxt(prompt_files + "/prompt_speech_feat.txt", prompt_feat);
+                readtxt<float>(prompt_files + "/flow_embedding.txt", spk_embeds);
+
+                lLaMa.TextToken2Embeds(prompt_text_token, prompt_text_embeds);
+                lLaMa.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds);
+                lToken2Wav.SpeechToken2Embeds(prompt_speech_token, prompt_speech_embeds_flow);
+
+
+                res.set_content("ok", "text/plain"); });
+
+    svr.Post("/get", [&](const httplib::Request &req, httplib::Response &res)
+             {
+                ALOGI("get wav files");
+                 {
+                // std::lock_guard<std::mutex> lock(wav_file_mutex);
+                if(b_tts_runing)
+                {
+                    nlohmann::json json;
+                    json["b_tts_runing"] = b_tts_runing.load();
+                    res.set_content(json.dump(), "application/json");
+                    res.status = 400;
+                }
+                else
+                {
+                    nlohmann::json json;
+                    json["wav_file"] = wav_file;
+                    json["b_tts_runing"] = b_tts_runing.load();
+                    res.set_content(json.dump(), "application/json");
+                    res.status = 200;
+                }
+            } });
+    int port = 12346;
+    ALOGI("api server start in host://0.0.0.0:%d", port);
+    ALOGI("Post /tts to start tts thread, json body: {\"text\": \"your text\"}");
+    ALOGI("Post /stop to stop tts thread");
+    ALOGI("Post /get to get wav files path(files for stream audio)");
+    svr.listen("0.0.0.0", port);
+    ALOGI("api server stop");
+    // if(text.size()>0)
+    // {
+    //     tts(
+    //         // for llm
+    //         text, prompt_text_embeds,prompt_speech_embeds,
+    //         // for flow
+    //         prompt_feat, prompt_speech_embeds_flow, spk_embeds
+    //     );
+    // }
+
+    // if (b_continue)
+    // {
+    //     printf("Type \"q\" to exit, Ctrl+c to stop current running\n");
+    // }
+
+    // while (b_continue)
+    // {
+    //     if(g_stop)
+    //     {
+    //         break;
+    //     }
+
+    //     printf("text >> ");
+    //     fflush(stdout);
+    //     std::getline(std::cin, text);
+    //     if (text == "q")
+    //     {
+    //         break;
+    //     }
+    //     if (text == "")
+    //     {
+    //         continue;
+    //     }
+
+    //     fflush(stdout);
+
+    //    tts(
+    //         // for llm
+    //         text, prompt_text_embeds,prompt_speech_embeds,
+    //         // for flow
+    //         prompt_feat, prompt_speech_embeds_flow, spk_embeds
+    //     );
+
+    // }
 
     lLaMa.Deinit();
     lToken2Wav.Deinit();
-    axclFinalize();
+
     return 0;
 }
