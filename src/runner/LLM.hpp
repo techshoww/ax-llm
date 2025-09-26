@@ -160,14 +160,14 @@ public:
         }
         update_cqdm(&cqdm, 1, "count", "embed_selector init ok");
 
-        for (auto &devid : _attr.dev_ids)
-        {
-            if (axcl_Init(devid) != 0)
-            {
-                ALOGE("axcl_Init(%d) failed", devid);
-                return false;
-            }
-        }
+        // for (auto &devid : _attr.dev_ids)
+        // {
+        //     if (axcl_Init(devid) != 0)
+        //     {
+        //         ALOGE("axcl_Init(%d) failed", devid);
+        //         return false;
+        //     }
+        // }
 
         llama_layers.resize(attr.axmodel_num);
         // prefill_layers.resize(attr.prefill_axmodel_num);
@@ -325,8 +325,8 @@ public:
         embed_selector.Deinit();
         llm_embed_selector.Deinit();
         speech_embed_selector.Deinit();
-        for (auto &devid : _attr.dev_ids)
-            axcl_Exit(devid);
+        // for (auto &devid : _attr.dev_ids)
+        //     axcl_Exit(devid);
     }
 
     void Stop()

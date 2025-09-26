@@ -136,7 +136,7 @@ with gr.Blocks() as demo:
     with gr.Row():
         text_input = gr.Textbox(value="琦琦，麻烦你适配一下这个新的模型吧。", label="输入文本")
         with gr.Column():
-            timesteps = gr.Slider(minimum=4, maximum=30, value=7, step=1, label="Timesteps")
+            timesteps = gr.Slider(minimum=4, maximum=30, value=10, step=1, label="Timesteps")
             run_btn = gr.Button("生成语音")
 
     status = gr.Label(label="状态")

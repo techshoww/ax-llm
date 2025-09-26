@@ -321,19 +321,32 @@ int main(int argc, char *argv[])
         return ret;
     }
     
+    for (auto &devid : devices)
+    {
+        if (axcl_Init(devid) != 0)
+        {
+            ALOGE("axcl_Init(%d) failed", devid);
+            return -1;
+        }
+    }
 
     if (!lLaMa.Init(attr))
     {
+        for (auto &devid : devices)
+            axcl_Exit(devid);
         axclFinalize();
         return -1;
     }
 
     if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
+        for (auto &devid : devices)
+            axcl_Exit(devid);
+        lLaMa.Deinit();
         axclFinalize();
         return -1;
     }
-    ALOGI();
+    
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
@@ -500,6 +513,8 @@ int main(int argc, char *argv[])
 
     lLaMa.Deinit();
     lToken2Wav.Deinit();
+    for (auto &devid : devices)
+        axcl_Exit(devid);
     axclFinalize();
     return 0;
 }
