@@ -384,7 +384,9 @@ public:
                 return -1;
             }
 
-            postion_id += 1;
+            residual_hidden = std::move(io_res_lm);
+
+            position_id += 1;
         }
 
         return 0;
