@@ -60,7 +60,7 @@ public:
 
     int Forward(std::vector<float> &x, std::vector<float> &mu, std::vector<float> &t, std::vector<float> &cond, std::vector<float> &output)
     {
-        void * p = part1->get_input("x").pVirAddr;
+        void * p = part1.get_input("x").pVirAddr;
         memcpy(p, x.data(), x.size() * sizeof(float));
         p = part1.get_input("mu").pVirAddr;
         memcpy(p, mu.data(), mu.size() * sizeof(float));
@@ -71,7 +71,7 @@ public:
 
         part1.inference();
 
-        float *p = part1->get_output(0).pVirAddr;
+        float *p = part1.get_output(0).pVirAddr;
         std::vector<unsigned short> out1_part1(5 * decoder._attr.hidden_size, 0);
         std::vector<unsigned short> out2_part1(5 * decoder._attr.hidden_size, 0);
 
@@ -118,7 +118,7 @@ public:
 
         part3.inference();
 
-        auto &out_part3 = part1->get_output(0);
+        auto &out_part3 = part1.get_output(0);
         output.resize(out_part3.nSize/sizeof(float));
         memcpy(output.data(), out_part3.pVirAddr, pVirAddr.nSize);
 

@@ -72,7 +72,6 @@ private:
 
     std::vector<LLMLayer> llama_layers;
     ax_runner_ax650 llama_post;
-    ax_runner_ax650 llm_decoder;
 
     // int prefill_grpid = 1;
     int decode_grpid = 0;
@@ -129,12 +128,6 @@ public:
             ALOGE("init post axmodel(%s) failed", attr.filename_post_axmodel.c_str());
             return false;
         }
-        ret = llm_decoder.init(attr.filename_decoder_axmodel.c_str(), false);
-        if (ret != 0)   
-        {
-            ALOGE("init llm decoder axmodel(%s) failed", attr.filename_decoder_axmodel.c_str());
-            return false;
-        }
 
         int remain_cmm = get_remaining_cmm_size();
         sprintf(axmodel_path, "init post axmodel ok,remain_cmm(%d MB)", remain_cmm);
@@ -185,7 +178,6 @@ public:
             llama_layers[i].layer.release();
         }
         llama_post.release();
-        llm_decoder.release();
         embed_selector.Deinit();
     }
 

@@ -70,6 +70,7 @@ public:
 
     void Deinit()
     {
+        std::vector<unsigned short>().swap(special_tokens);
         encoder.Deinit();
     }
 
@@ -96,7 +97,7 @@ public:
             // float32 to bfloat16
             for(int j=0; j<patch_size*hidden_size; j++)
             {
-                special_tokens[hidden_size + j] = bfloat16(out_proj[j]).data;
+                io_encoder[hidden_size + j] = bfloat16(out_proj[j]).data;
             }
 
             ret = encoder.Forward(io_encoder, false);
