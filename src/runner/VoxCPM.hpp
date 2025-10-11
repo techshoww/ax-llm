@@ -153,7 +153,7 @@ public:
     // streaming inference
     int Inference(std::vector<int> &text, std::vector<int> &text_mask, std::vector<float> &feat, std::vector<int> &feat_mask, 
                     int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0,
-                    )
+                    std::vector<float> &feat_pred)
     {
         int ret;
         std::vector<float> feat_embed;
@@ -281,6 +281,7 @@ public:
         std:vector<float> prefix_feat_cond(feat.end()-config.patch_size*config.feat_dim, feat.end());
 
         std::vector<float> pred_feat_seq;
+        pred_feat_seq.reserve( 4 * 3 * config.patch_size * config.feat_dim); // 4 可以换成成其他值
         for(int i=0; i< max_len; i++)
         {
             std::vector<float> dit_hidden_1;
@@ -321,12 +322,72 @@ public:
             
             ret = enc_to_lm_proj.Forward(curr_embed, curr_embed);
             
-            pred_feat_seq.insert(pred_feat_seq.end(), pred_feat.begin(), pred_feat.end());            
+            if(pred_feat_seq.size() >= 4 * 3 * config.patch_size * config.feat_dim - config.patch_size * config.feat_dim)
+            {
+                pred_feat_seq.erase(pred_feat_seq.end() - 2 * config.patch_size * config.feat_dim, pred_feat_seq.end());  // 只保留最后 2 个
+            } 
+
+            pred_feat_seq.insert(pred_feat_seq.end(), pred_feat.begin(), pred_feat.end());          
+             
             prefix_feat_cond = std::move(pred_feat);
 
-            pred_feat_chunk = 
+            std::vector<float> pred_feat_chunk(pred_feat_seq.end() - 3 * config.patch_size * config.feat_dim, pred_feat_seq.end());
+            feat_pred = rearrangeVector(pred_feat_chunk, 1, 3, config.patch_size, config.feat_dim);
 
+            std::vector<float> stop_flag;
+            ret = stop_predictor.Forward(lm_hidden, stop_flag);
+            if(ret!=0)
+            {
+                ALOGE("stop_predictor.Forward failed");
+                return -1;
+            }
+
+            if(i > min_len && stop_flag[0]==1)
+            {
+                break;
+            }
+
+            std::vector<unsigned short> curr_embed_bf16(curr_embed.size());
+            for(int j=0; j<curr_embed.size(); j++)
+            {
+                // float32 to bfloat16
+                curr_embed_bf16[j] = bfloat16(curr_embed[j]).data;
+            }
+
+            ret = base_lm.ForwardStep(curr_embed_bf16, position_id);
+            if(ret!=0)
+            {
+                ALOGE("base_lm.ForwardStep failed");
+                return -1;
+            }
+
+            // bfloat16 to float32
+            for(int j=0; j<curr_embed_bf16.size(); j++)
+            {
+                unsigned int tmp_u32 = curr_embed_bf16[j] << 16;
+                lm_hidden[j] = *reinterpret_cast<float *>(&tmp_u32);
+            }
+
+            fsq_layer.Forward(lm_hidden, lm_hidden);
+            
+            std::vector<unsigned short> io_res_lm(lm_hidden.size());
+            // float32  to bfloat16
+            for(int j=0; j<lm_hidden.size(); j++)
+            {
+                io_res_lm[j] = bfloat16(lm_hidden[j] + curr_embed[j]).data;
+            }
+
+            ret = residual_lm.ForwardStep(io_res_lm, position_id);
+            if(ret!=0)
+            {
+                ALOGE("residual_lm.ForwardStep failed");
+                return -1;
+            }
+
+            postion_id += 1;
         }
+
+        return 0;
     }
     
 };
