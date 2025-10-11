@@ -278,7 +278,7 @@ public:
 
         int position_id = prefill_len;
 
-        std:vector<float> prefix_feat_cond(feat.end()-config.patch_size*config.feat_dim, feat.end());
+        std::vector<float> prefix_feat_cond(feat.end()-config.patch_size*config.feat_dim, feat.end());
 
         std::vector<float> pred_feat_seq;
         pred_feat_seq.reserve( 4 * 3 * config.patch_size * config.feat_dim); // 4 可以换成成其他值
