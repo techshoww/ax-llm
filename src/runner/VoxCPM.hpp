@@ -21,11 +21,12 @@
 #include "ax_sys_api.h"
 #include "utils/sampling.hpp"
 #include "utils/utils.hpp"
+#include "utils/whisper.hpp"
 #include "MiniCPM.hpp"
 #include "LocEnc.hpp"
 #include "UnifiedCFM.hpp"
 #include "SimpleLayer.hpp"
-#include "Tokenizer/Tokenizer.hpp"
+#include "AudioVAE.hpp"
 
 
 struct VoxCPMEncoderConfig
@@ -84,6 +85,7 @@ private:
     SimpleLayer stop_predictor;
 
     VoxCPMConfig config;
+    AudioVAE audio_vae;
 
 public:
     bool Init(VoxCPMConfig &config )
@@ -129,7 +131,9 @@ public:
         enc_to_lm_proj.Init(config.dir_axmodels+"/enc_to_lm_proj.axmodel", config.encoder_config.hidden_dim, config.lm_config.hidden_size);
         lm_to_dit_proj.Init(config.dir_axmodels+"/lm_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
         res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim)
-        stop_predictor.Init(config.dir_axmodels+"/stop_predictor.axmodel", config.lm_config.hidden_size, 1)
+        stop_predictor.Init(config.dir_axmodels+"/stop_predictor.axmodel", config.lm_config.hidden_size, 1);
+
+        audio_vae.Init(config.dir_axmodels);
     }
 
     void Deinit()
@@ -143,17 +147,153 @@ public:
         lm_to_dit_proj.Deinit();
         res_to_dit_proj.Deinit();
         stop_predictor.Deinit();
+        audio_vae.Deinit();
     }
 
-    int GenerateWithPromptCache()
+    int GenerateStreaming(std::vector<std::vector<float>> generate_result,
+                            const std::string &text, const std::string &prompt_text, const std::string &prompt_wav_path,
+                            float cfg_value=2.0, int inference_timesteps=10, int max_length=4096, 
+                            bool normalize=false, bool denoise=false )
     {
+        if(normalize)
+        {
+            ALOGE("not support normalize");
+            return -1;
+        }
+        if(denoise)
+        {
+            ALOGE("not support denoise");
+            return -1;
+        }
 
+        int ret;
+        std::vector<int> prompt_text_proken;
+        std::vector<float> prompt_audio_feat;
+
+        if(!prompt_text.empty() && !prompt_wav_path.empty() )
+        {
+            ret = BuildPromptCache(prompt_text_proken, prompt_audio_feat, prompt_text, prompt_wav_path);
+            if(ret !=0)
+            {
+                ALOGE("BuildPromptCache failed");
+                return -1;
+            }
+        }   
+
+        ret = GenerateWithPromptCache(generate_result, text, prompt_text_proken, prompt_audio_feat, min_len, max_len, inference_timesteps, cfg_value);
+        if(ret !=0)
+        {
+            ALOGE("GenerateWithPromptCache failed");
+            return -1;
+        }
+        
+        return 0;
+    }
+
+    int BuildPromptCache(std::vector<int> &text_token, std::vector<float> &out_feat, const std::string &prompt_text, const std::string &prompt_wav_path)
+    {
+        ImageInfo img_info;
+        img_info.img_prompt = false;
+        std::vector<int> text_token = tokenizer->Encode(prompt_text, img_info);        
+
+        std::vector<float> audio = load_audio(prompt_wav_path, audio_vae._sample_rate);
+        if(audio.empty())
+        {
+            ALOGE("load_audio %s failed", prompt_wav_path);
+            return -1;
+        }
+
+        int patch_len = config.patch_size * audio_vae.chunk_size;
+        int remainder = audio.size() % patch_len;
+        if(remainder != 0)
+        {
+            int padding_size = patch_len - remainder;
+            audio.insert(audio.end(), padding_size, 0.0f);
+        }
+
+        std::vector<float> audio_feat;
+        audio_vae.Encode(audio_feat, audio);
+
+        int N = audio_feat.size() / audio_vae.latent_dim;
+        int T = audio_feat.size() / (audio_vae.latent_dim * config.patch_size);
+        const int output_size = (T - 1) * config.patch_size * audio_vae.latent_dim;
+        out_feat.clear();
+        out_feat.reserve(output_size);
+
+        // 模拟 view + permute + 切片操作
+        for (int b = 0; b < T - 1; ++b) {       // 切片后第一维: 0 到 T-2
+            for (int c = 0; c < config.patch_size; ++c) { // 第二维: 0 到 1
+                for (int a = 0; a < audio_vae.latent_dim; ++a) { // 第三维: 0 到 63
+                // 计算在原始一维数组中的索引
+                // 对应关系: output[b,c,a] = original[a,b,c]
+                    int input_index = a * N + b * config.patch_size + c;
+                    out_feat.push_back(audio_feat[input_index]);
+                }
+            }
+        }
+        return 0;
+
+    }
+
+    int GenerateWithPromptCache(std::vector<std::vector<float>> &result,
+                                std::string &target_text, std::vector<int> &prompt_text_token, std::vector<float> &prompt_audio_feat,
+                                int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0)
+    {
+        ImageInfo img_info;
+        img_info.img_prompt = false;
+        std::vector<int> target_text_token = tokenizer->Encode(target_text, img_info);        
+        int target_text_length = target_text_token.size();
+        std::vector<int> text_token(prompt_text_token);
+        text_token.insert(text_token.end(), target_text_token.begin(), target_text_token.end());
+        text_token.push_back(audio_start_token);
+
+        int audio_vae_latent_dim = 64;
+        int audio_length = prompt_audio_feat.size()/(config.patch_size * audio_vae_latent_dim);
+        int text_length = text_token.size();
+        std::vector<int> text_pad_token(audio_length, 0);
+        std::vector<float> audio_pad_feat(text_token.size() * config.patch_size * audio_vae_latent_dim, 0);
+
+        text_token.insert(text_token.end(), text_pad_token.begin(), text_pad_token.end());
+        std::vector<float> audio_feat(audio_pad_feat);
+        audio_feat.insert(audio_feat.end(), prompt_audio_feat.begin(), prompt_audio_feat.end());
+
+        std::vector<int> text_mask(text_length + audio_length);
+        std::fill_n(text_mask.begin(), text_length, 1);
+        std::fill_n(text_mask.begin() + text_length, audio_length, 0);
+
+        std::vector<int> audio_mask(text_length + audio_length);
+        std::fill_n(audio_mask.begin(), text_length, 0);
+        std::fill_n(audio_mask.begin() + text_length, audio_length, 1);
+
+        std::vector<std::vector<float>> pred_feat;
+        int ret = Inference(pred_feat, text_token, text_mask, audio_feat, audio_mask, min_len, max_len, inference_timesteps, cfg_value);
+        if(ret!=0)
+        {
+            ALOGE("Inference failed");
+            return -1;
+        }
+
+        int patch_len = config.patch_size * audio_vae.chunk_size;
+        for(int i=0; i<pred_feat.size(); i++)
+        {
+            std::vector<float> decode_audio;
+            audio_vae.decode(decode_audio, pred_feat[i]);
+
+            if(decode_audio.size() > patch_len)
+            {
+                decode_audio.assign(decode_audio.end() - patch_len, decode_audio.end());
+            }
+            result.push_back(decode_audio);
+            // 未完
+        }
+
+        return 0;
     }
 
     // streaming inference
-    int Inference(std::vector<int> &text, std::vector<int> &text_mask, std::vector<float> &feat, std::vector<int> &feat_mask, 
-                    int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0,
-                    std::vector<float> &feat_pred)
+    int Inference(std::vector<std::vector<float>> &result,
+                    std::vector<int> &text, std::vector<int> &text_mask, std::vector<float> &feat, std::vector<int> &feat_mask, 
+                    int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0)
     {
         int ret;
         std::vector<float> feat_embed;
@@ -332,7 +472,8 @@ public:
             prefix_feat_cond = std::move(pred_feat);
 
             std::vector<float> pred_feat_chunk(pred_feat_seq.end() - 3 * config.patch_size * config.feat_dim, pred_feat_seq.end());
-            feat_pred = rearrangeVector(pred_feat_chunk, 1, 3, config.patch_size, config.feat_dim);
+            std::vector<float> feat_pred = rearrangeVector(pred_feat_chunk, 1, 3, config.patch_size, config.feat_dim);
+            result.push_back(feat_pred);
 
             std::vector<float> stop_flag;
             ret = stop_predictor.Forward(lm_hidden, stop_flag);

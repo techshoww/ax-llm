@@ -74,6 +74,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 function(build_exec name main_source)
     add_executable(${name} ${main_source}
                     src/runner/ax_model_runner/ax_model_runner_ax650.cpp 
+                    src/runner/utils/whisper.cpp
                     src/runner/utils/memory_utils.cpp 
                     src/runner/utils/cqdm.cpp
                     src/runner/Tokenizer/Tokenizer.cpp
