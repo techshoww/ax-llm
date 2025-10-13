@@ -36,13 +36,11 @@ struct LLMAttrType
     int prefill_grpid = -1;
 
     TokenizerType tokenizer_type = TKT_HTTP;
-    std::string filename_tokenizer_model = "http://127.0.0.1:12345";
+    std::string url_tokenizer = "http://127.0.0.1:12345";
     bool b_bos = false, b_eos = false;
-    std::string filename_tokens_embed = "tinyllama.model.embed_tokens.weight.bfloat16.bin";
-    std::string filename_llm_embed = "tinyllama.model.embed_tokens.weight.bfloat16.bin";
-    std::string filename_speech_embed = "tinyllama.model.embed_tokens.weight.bfloat16.bin";
-    int tokens_embed_num = 151936;
-    int tokens_embed_size = 896;
+    std::string filename_tokens_embed = "model.embed_tokens.weight.bfloat16.bin"; 
+    int tokens_embed_num = 73448;
+    int tokens_embed_size = 1024;
 
     int max_token_len = 127; // auto calc
 
@@ -59,9 +57,6 @@ class MiniCPM
 private:
     std::shared_ptr<BaseTokenizer> tokenizer;
     LLaMaEmbedSelector embed_selector;
-
-    LLMAttrType _attr;
-
     struct LLMLayer
     {
         ax_runner_ax650 layer;
@@ -80,15 +75,17 @@ private:
     int max_len = -1;
 
 public:
+    LLMAttrType _attr;
+
     bool Init(LLMAttrType attr)
     {
         ALOGI("LLM init start");
         t_cqdm cqdm = create_cqdm(attr.axmodel_num + 3, 32);
         this->_attr = attr;
         tokenizer = CreateTokenizer(attr.tokenizer_type);
-        if (!tokenizer->Init(attr.filename_tokenizer_model, attr.b_bos, attr.b_eos))
+        if (!tokenizer->Init(attr.url_tokenizer, attr.b_bos, attr.b_eos))
         {
-            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.filename_tokenizer_model.c_str(), attr.b_bos, attr.b_eos);
+            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.url_tokenizer.c_str(), attr.b_bos, attr.b_eos);
             return false;
         }
         update_cqdm(&cqdm, 0, "count", "tokenizer init ok");
@@ -214,6 +211,11 @@ public:
             return -1;
         }
 
+        std::vector<std::vector<int>> position_ids(1, std::vector<int>(input_embed_num));
+        for (int i = 0; i < input_embed_num; ++i) {
+            position_ids[0][i] = i;
+        }
+
         int kv_cache_num;
 
         for (size_t p = 0; p < prefill_split_num; p++)
@@ -225,6 +227,7 @@ public:
             _attr.prefill_grpid = p + 1;
             kv_cache_num = p * _attr.prefill_token_num;
             std::vector<unsigned short> mask_tmp;
+            bfloat16 bf16 = -65536.f;
             mask_tmp.resize(1 * _attr.prefill_token_num * (kv_cache_num + _attr.prefill_token_num), bf16.data);
             int input_num_token = _attr.prefill_token_num;
             if (p == prefill_split_num - 1)
@@ -373,7 +376,7 @@ public:
         unsigned int indices = position_id;
         if (b_stop)
         {
-            break;
+            return 0;
         }
 
         memcpy((void *)llama_layers[0].layer.get_input(decode_grpid, "input").pVirAddr, embed.data(), llama_layers[0].layer.get_input(decode_grpid, "input").nSize);

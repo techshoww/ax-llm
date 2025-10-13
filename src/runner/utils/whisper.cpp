@@ -299,7 +299,7 @@ std::vector<float> load_audio(const std::string& inputFile, int sample_rate) {
 
         // 构建execvp参数数组（避免Shell解析）
         char* args[] = {
-            (char*)"/usr/bin/ffmpeg",
+            (char*)"ffmpeg",
             (char*)"-nostdin",
             (char*)"-threads", (char*)"0",
             (char*)"-i", (char*)inputFile.c_str(),

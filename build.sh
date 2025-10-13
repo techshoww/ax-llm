@@ -67,8 +67,26 @@ else
     echo "libopencv-4.5.5-aarch64 already exists"
 fi
 
+onnxruntime_aarch64_url=https://github.com/ZHEQIUSHUI/SAM-ONNX-AX650-CPP/releases/download/ax_models/onnxruntime-aarch64-none-gnu-1.16.0.zip
+if [ ! -f "onnxruntime-aarch64-none-gnu-1.16.0.zip" ]; then
+    # Download the file
+    echo "Downloading $onnxruntime_aarch64_url"
+    wget "$onnxruntime_aarch64_url" -O "onnxruntime-aarch64-none-gnu-1.16.0.zip"
+else 
+    echo "onnxruntime-aarch64-none-gnu-1.16.0.zip already exists"
+fi
+
+# Check if the folder exists
+if [ ! -d "onnxruntime-aarch64-none-gnu-1.16.0" ]; then
+    # Extract the file
+    echo "Extracting unzip onnxruntime-aarch64-none-gnu-1.16.0.zip"
+    unzip onnxruntime-aarch64-none-gnu-1.16.0.zip
+else
+    echo "onnxruntime-aarch64-none-gnu-1.16.0 already exists"
+fi
 
 # 开始编译
-cmake -DBSP_MSP_DIR=${BSP_MSP_DIR} -DCMAKE_TOOLCHAIN_FILE=../toolchains/aarch64-none-linux-gnu.toolchain.cmake -DOpenCV_DIR=$PWD/libopencv-4.5.5-aarch64/lib/cmake/opencv4 ..
+cmake -DBSP_MSP_DIR=${BSP_MSP_DIR} -DCMAKE_TOOLCHAIN_FILE=../toolchains/aarch64-none-linux-gnu.toolchain.cmake -DOpenCV_DIR=$PWD/libopencv-4.5.5-aarch64/lib/cmake/opencv4 \
+    -DONNXRUNTIME_DIR=$PWD/onnxruntime-aarch64-none-gnu-1.16.0 \..
 make -j16
 make install

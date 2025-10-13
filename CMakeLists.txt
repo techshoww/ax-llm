@@ -18,16 +18,35 @@ add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# mnn
-option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) # 明确写出帮助字符串是好习惯
-option(MNN_KLEIDIAI "Enable Kleidiai backend for MNN" OFF)
-option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
+# string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" CMAKE_SYSTEM_PROCESSOR_LOWER)
 
-set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/MNN)
-add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/MNN)
+# if(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86_64" OR
+#    CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "amd64" OR
+#    CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86" OR
+#    CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i386" OR
+#    CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i686")
+#     set(SYSTEM_ARCH "x86")
+#     message(STATUS "Detected x86/x86_64 architecture.")
+# elseif(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "aarch64" OR
+#        CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "arm64")
+#     set(SYSTEM_ARCH "aarch64")
+#     message(STATUS "Detected aarch64 architecture.")
+# else()
+#     set(SYSTEM_ARCH "unknown")
+#     message(WARNING "Unknown or unsupported system processor architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+# endif()
 
 
-include_directories(third_party/MNN/include/)
+# if(SYSTEM_ARCH STREQUAL "x86")
+#     include_directories(third_party/onnxruntime-linux-x64-1.23.0/include)
+#     link_directories(third_party/onnxruntime-linux-x64-1.23.0/lib)
+# elseif(SYSTEM_ARCH STREQUAL "aarch64") 
+#     include_directories(third_party/onnxruntime-linux-aarch64-1.23.0/include)
+#     link_directories(third_party/onnxruntime-linux-aarch64-1.23.0/lib)
+# endif()
+
+include_directories(${ONNXRUNTIME_DIR}/include)
+link_directories(${ONNXRUNTIME_DIR}/lib)
 
 # bsp
 if(NOT BSP_MSP_DIR)
@@ -42,19 +61,6 @@ endif()
 message(STATUS "BSP_MSP_DIR = ${BSP_MSP_DIR}")
 include_directories(${BSP_MSP_DIR}/include)
 link_directories(${BSP_MSP_DIR}/lib)
-
-# set(SPM_ENABLE_SHARED OFF)
-# add_subdirectory(third_party/sentencepiece)
-# include_directories(third_party/sentencepiece/src)
-# include_directories(third_party/sentencepiece/third_party/protobuf-lite)
-
-# set(ABSL_ENABLE_INSTALL ON)
-# set(ABSL_PROPAGATE_CXX_STD ON)
-# add_subdirectory(third_party/abseil-cpp)
-# add_subdirectory(third_party/re2)
-# include_directories(third_party/abseil-cpp)
-# include_directories(third_party/re2)
-# link_directories(${CMAKE_BINARY_DIR}/lib)
 
 # 添加 FLAGS 检查代码是否有明显 bug
 include(overlook.cmake)
@@ -74,6 +80,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 function(build_exec name main_source)
     add_executable(${name} ${main_source}
                     src/runner/ax_model_runner/ax_model_runner_ax650.cpp 
+                    src/runner/BaseRunner.cpp
                     src/runner/utils/whisper.cpp
                     src/runner/utils/memory_utils.cpp 
                     src/runner/utils/cqdm.cpp
@@ -86,12 +93,12 @@ function(build_exec name main_source)
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
     target_link_libraries(${name} ${OpenCV_LIBS})
-    target_link_libraries(${name} MNN)
+    target_link_libraries(${name} onnxruntime)
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
 build_exec(main src/main.cpp)
-build_exec(main_api src/main_api.cpp)
+# build_exec(main_api src/main_api.cpp)
 
 file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh")
 install(FILES ${RUN_SCRIPT} DESTINATION bin/)

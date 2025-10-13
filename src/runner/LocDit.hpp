@@ -58,6 +58,13 @@ public:
         return true;
     }
 
+    void Deinit()
+    {
+        part1.release();
+        part3.release();
+        decoder.Deinit();
+    }
+
     int Forward(std::vector<float> &x, std::vector<float> &mu, std::vector<float> &t, std::vector<float> &cond, std::vector<float> &output)
     {
         void * p = part1.get_input("x").pVirAddr;
@@ -71,23 +78,25 @@ public:
 
         part1.inference();
 
-        float *p = part1.get_output(0).pVirAddr;
         std::vector<unsigned short> out1_part1(5 * decoder._attr.hidden_size, 0);
         std::vector<unsigned short> out2_part1(5 * decoder._attr.hidden_size, 0);
+
+        p = part1.get_output(0).pVirAddr;
+    
 
         // float32 to bfloat16
         for(int j=0; j<out1_part1.size(); j++)
         {
-            out1_part1[j] = bfloat16(p[j]).data;
+            out1_part1[j] = bfloat16(((float *)p)[j]).data;
         }
 
         for(int j=0; j<out2_part1.size(); j++)
         { 
-            out2_part1[j] = bfloat16(p[ 5 * decoder._attr.hidden_size + j]).data;
+            out2_part1[j] = bfloat16(((float *)p)[ 5 * decoder._attr.hidden_size + j]).data;
         }
+        
 
-      
-        ret = decoder.Forward(out1_part1, false);
+        int ret = decoder.Forward(out1_part1, false);
         if(!ret)
         {
             ALOGE("decoder Forward failed");
@@ -107,20 +116,20 @@ public:
         for(int j=0; j<5 * decoder._attr.hidden_size; j++)
         {
             unsigned int tmp = out1_part1[j] << 16;
-            p[j] = *reinterpret_cast<float *>(&tmp);
+            ((float *)p)[j] = *reinterpret_cast<float *>(&tmp);
         }
 
         for(int j=0; j<5 * decoder._attr.hidden_size; j++)
         {
             unsigned int tmp = out2_part1[j] << 16;
-            p[5 * decoder._attr.hidden_size + j] = *reinterpret_cast<float *>(&tmp);
+            ((float *)p)[5 * decoder._attr.hidden_size + j] = *reinterpret_cast<float *>(&tmp);
         }
 
         part3.inference();
 
         auto &out_part3 = part1.get_output(0);
         output.resize(out_part3.nSize/sizeof(float));
-        memcpy(output.data(), out_part3.pVirAddr, pVirAddr.nSize);
+        memcpy(output.data(), out_part3.pVirAddr, out_part3.nSize);
 
         return 0;
     }

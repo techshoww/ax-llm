@@ -36,16 +36,23 @@ private:
     int hidden_size = 1024;
 
 public:
-    bool Init(LLMAttrType &config, std::string &dir_axmodel)
+    bool Init(LLMAttrType &config, const std::string &dir_axmodel)
     {
         int ret ;
         hidden_size = config.hidden_size;
 
-        ret = readtxt(dir_axmodel+"/feat_encoder.special_token.txt", special_tokens);
-        if(ret<=0)
+        std::vector<float> special_tokens_fp32;
+        ret = readtxt(dir_axmodel+"/feat_encoder.special_token.txt", special_tokens_fp32);
+        if(ret!=0)
         {
-            ALOGE("load %s failed", (dir_axmodel+"/feat_encoder.special_token.txt").c_str());
+            ALOGE("load %s failed %d", (dir_axmodel+"/feat_encoder.special_token.txt").c_str(), ret);
             return false;
+        }
+
+        special_tokens.resize(special_tokens_fp32.size());
+        for(int i=0; i<special_tokens_fp32.size(); i++)
+        {
+            special_tokens[i] = bfloat16(special_tokens_fp32[i]).data;
         }
 
         in_proj = CreateRunner(RT_OnnxRunner);
@@ -93,7 +100,7 @@ public:
 
             memcpy(out_proj.data(), (void *)in_proj->getOutputPtr(0), out_proj.size() * sizeof(float));
             
-            std::copy(special_tokens.begin(), special_tokens,end(), io_encoder.begin());
+            std::copy(special_tokens.begin(), special_tokens.end(), io_encoder.begin());
             // float32 to bfloat16
             for(int j=0; j<patch_size*hidden_size; j++)
             {

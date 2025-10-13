@@ -31,7 +31,7 @@ private:
     
 
 public:
-    bool Init(std::string &path_axmodel, int in_size_axmodel, int out_size_axmodel)
+    bool Init(const std::string &path_axmodel, int in_size_axmodel, int out_size_axmodel)
     {
         int ret;
         ret = model.init(path_axmodel.c_str(), false);

@@ -32,18 +32,6 @@ private:
         return readtxt(model_dir+"/rand_noise.txt", rand_noise);
     }
 
-    // int init_tspan(int n_timesteps)
-    // {
-    //     if(n_timesteps <4)
-    //     {
-    //         return -1;
-    //     }
-
-    //     n_timesteps = n_timesteps;
-    //     t_span = linspace(1.0, 0.0, n_timesteps + 1);
-    //     return 0;
-    // }
-
 public:
     bool Init(int in_channels, CfmConfig &cfm_params, LLMAttrType &locdit_config, std::string &dir_axmodels)
     {
@@ -53,7 +41,7 @@ public:
         ret = init_noise(dir_axmodels);
         if(ret!=0)
         {
-            ALOGE("init noise failed", );
+            ALOGE("init noise failed");
             return false;
         }
 

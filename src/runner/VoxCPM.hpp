@@ -28,7 +28,7 @@
 #include "SimpleLayer.hpp"
 #include "AudioVAE.hpp"
 
-
+using WavBuffer = std::deque<std::vector<float>>;
 struct VoxCPMEncoderConfig
 {
     int hidden_dim = 1024;
@@ -41,7 +41,7 @@ struct VoxCPMDitConfig
     int hidden_dim = 1024;
     int num_layers = 4;
     CfmConfig cfm_config;
-}
+};
 
 struct VoxCPMConfig
 {
@@ -62,6 +62,8 @@ struct VoxCPMConfig
     std::string dir_feat_encoder;
     std::string dir_decoder_estimator;
     std::string dir_axmodels;
+
+    std::string url_tokenizer;
     
 };
 
@@ -87,6 +89,8 @@ private:
     VoxCPMConfig config;
     AudioVAE audio_vae;
 
+    bool b_stop = false;
+
 public:
     bool Init(VoxCPMConfig &config )
     {
@@ -95,14 +99,15 @@ public:
         config = config;
         
         tokenizer = CreateTokenizer(tokenizer_type);
-        if (!tokenizer->Init(attr.filename_tokenizer_model, attr.b_bos, attr.b_eos))
+        if (!tokenizer->Init(config.url_tokenizer, false, false))
         {
-            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.filename_tokenizer_model.c_str(), attr.b_bos, attr.b_eos);
+            ALOGE("tokenizer.Init(%s, %d, %d) failed", config.url_tokenizer.c_str(), false, false);
             return false;
         }
 
         config.lm_config.template_filename_axmodel = config.dir_base_lm + "/" + "MiniCPMForCausalLM_p64_l%d_together.axmodel";
         config.lm_config.filename_post_axmodel = config.dir_base_lm + "/" + "MiniCPMForCausalLM_post.axmodel";
+        config.lm_config.filename_tokens_embed = config.dir_base_lm + "/" + "model.embed_tokens.weight.bfloat16.bin"; 
         base_lm.Init(config.lm_config);
 
         LLMAttrType residual_lm_config = config.lm_config;
@@ -119,7 +124,6 @@ public:
         encoder_lm_config.hidden_size = config.encoder_config.hidden_dim;
         feat_encoder.Init(encoder_lm_config, config.dir_axmodels);
 
-
         LLMAttrType decoder_lm_config = config.lm_config;
         decoder_lm_config.template_filename_axmodel = config.dir_decoder_estimator + "/" + "MiniCPMForCausalLM_p64_l%d_together.axmodel";
         decoder_lm_config.filename_post_axmodel = config.dir_decoder_estimator + "/" + "MiniCPMForCausalLM_post.axmodel";
@@ -130,10 +134,13 @@ public:
         fsq_layer.Init(config.dir_axmodels+"/fsq_layer.axmodel", config.lm_config.hidden_size, config.lm_config.hidden_size);
         enc_to_lm_proj.Init(config.dir_axmodels+"/enc_to_lm_proj.axmodel", config.encoder_config.hidden_dim, config.lm_config.hidden_size);
         lm_to_dit_proj.Init(config.dir_axmodels+"/lm_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
-        res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim)
+        res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
         stop_predictor.Init(config.dir_axmodels+"/stop_predictor.axmodel", config.lm_config.hidden_size, 1);
 
         audio_vae.Init(config.dir_axmodels);
+
+        ALOGI("VoxCPM init finised");
+        return true;
     }
 
     void Deinit()
@@ -150,10 +157,18 @@ public:
         audio_vae.Deinit();
     }
 
-    int GenerateStreaming(std::vector<std::vector<float>> generate_result,
-                            const std::string &text, const std::string &prompt_text, const std::string &prompt_wav_path,
-                            float cfg_value=2.0, int inference_timesteps=10, int max_length=4096, 
-                            bool normalize=false, bool denoise=false )
+    void Stop()
+    {
+        b_stop = true;
+    }
+
+    int GenerateStreaming(WavBuffer& wav_buffer,
+                        std::mutex& buffer_mutex,
+                        std::condition_variable& buffer_cv,
+                        std::atomic<bool>& finished,
+                        const std::string &text, const std::string &prompt_text, const std::string &prompt_wav_path,
+                        float cfg_value=2.0, int inference_timesteps=10, int max_length=4096, 
+                        bool normalize=false, bool denoise=false )
     {
         if(normalize)
         {
@@ -180,7 +195,8 @@ public:
             }
         }   
 
-        ret = GenerateWithPromptCache(generate_result, text, prompt_text_proken, prompt_audio_feat, min_len, max_len, inference_timesteps, cfg_value);
+        ret = GenerateWithPromptCache(wav_buffer, buffer_mutex, buffer_cv, finished,
+            text, prompt_text_proken, prompt_audio_feat, 2, max_length, inference_timesteps, cfg_value);
         if(ret !=0)
         {
             ALOGE("GenerateWithPromptCache failed");
@@ -194,7 +210,7 @@ public:
     {
         ImageInfo img_info;
         img_info.img_prompt = false;
-        std::vector<int> text_token = tokenizer->Encode(prompt_text, img_info);        
+        text_token = tokenizer->Encode(prompt_text, img_info);        
 
         std::vector<float> audio = load_audio(prompt_wav_path, audio_vae._sample_rate);
         if(audio.empty())
@@ -235,8 +251,11 @@ public:
 
     }
 
-    int GenerateWithPromptCache(std::vector<std::vector<float>> &result,
-                                std::string &target_text, std::vector<int> &prompt_text_token, std::vector<float> &prompt_audio_feat,
+    int GenerateWithPromptCache(WavBuffer& wav_buffer,
+                                std::mutex& buffer_mutex,
+                                std::condition_variable& buffer_cv,
+                                std::atomic<bool>& finished,
+                                const std::string &target_text, std::vector<int> &prompt_text_token, std::vector<float> &prompt_audio_feat,
                                 int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0)
     {
         ImageInfo img_info;
@@ -266,32 +285,36 @@ public:
         std::fill_n(audio_mask.begin() + text_length, audio_length, 1);
 
         std::vector<std::vector<float>> pred_feat;
-        int ret = Inference(pred_feat, text_token, text_mask, audio_feat, audio_mask, min_len, max_len, inference_timesteps, cfg_value);
+        int ret = Inference(wav_buffer, buffer_mutex, buffer_cv, finished,
+            text_token, text_mask, audio_feat, audio_mask, min_len, max_len, inference_timesteps, cfg_value);
         if(ret!=0)
         {
             ALOGE("Inference failed");
             return -1;
         }
 
-        int patch_len = config.patch_size * audio_vae.chunk_size;
-        for(int i=0; i<pred_feat.size(); i++)
-        {
-            std::vector<float> decode_audio;
-            audio_vae.decode(decode_audio, pred_feat[i]);
+        // int patch_len = config.patch_size * audio_vae.chunk_size;
+        // for(int i=0; i<pred_feat.size(); i++)
+        // {
+        //     std::vector<float> decode_audio;
+        //     audio_vae.decode(decode_audio, pred_feat[i]);
 
-            if(decode_audio.size() > patch_len)
-            {
-                decode_audio.assign(decode_audio.end() - patch_len, decode_audio.end());
-            }
-            result.push_back(decode_audio);
-            // 未完
-        }
+        //     if(decode_audio.size() > patch_len)
+        //     {
+        //         decode_audio.assign(decode_audio.end() - patch_len, decode_audio.end());
+        //     }
+        //     result.push_back(decode_audio);
+        //     // 未完
+        // }
 
         return 0;
     }
 
     // streaming inference
-    int Inference(std::vector<std::vector<float>> &result,
+    int Inference(WavBuffer& wav_buffer,
+                    std::mutex& buffer_mutex,
+                    std::condition_variable& buffer_cv,
+                    std::atomic<bool>& finished,
                     std::vector<int> &text, std::vector<int> &text_mask, std::vector<float> &feat, std::vector<int> &feat_mask, 
                     int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0)
     {
@@ -301,6 +324,7 @@ public:
         if(ret!=0)
         {
             ALOGE("feat_encoder failed");
+            finished = true;
             return -1;
         }
 
@@ -308,6 +332,7 @@ public:
         if(ret!=0)
         {
             ALOGE("enc_to_lm_proj.Forward failed");
+            finished = true;
             return -1;
         }
 
@@ -327,7 +352,7 @@ public:
 
             if(tm==0 && fm==0)
             {
-                std::fill(combined_embed.begin() + i * hidden_size, combined_embed + (i + 1) * hidden_size, bfloat16(0.0f).data);
+                std::fill(combined_embed.begin() + i * hidden_size, combined_embed.begin() + (i + 1) * hidden_size, bfloat16(0.0f).data);
             }
             else if(tm!=0 && fm==0)
             {
@@ -360,6 +385,7 @@ public:
         if(ret!=0)
         {
             ALOGE("base_lm.Forward failed");
+            finished = true;
             return -1;
         }
 
@@ -378,6 +404,7 @@ public:
         if(ret!=0)
         {
             ALOGE("fsq_layer.Forward failed");
+            finished = true;
             return -1;
         }
 
@@ -410,6 +437,7 @@ public:
         if(ret!=0)
         {
             ALOGE("residual_lm.Forward failed");
+            finished = true;
             return -1;
         }
 
@@ -448,6 +476,7 @@ public:
             if(ret!=0)
             {
                 ALOGE("feat_decoder.Forward failed");
+                finished = true;
                 return -1;
             }
 
@@ -457,6 +486,7 @@ public:
             if(ret!=0)
             {
                 ALOGE("feat_encoder.Forward failed");
+                finished = true;
                 return -1;
             }
             
@@ -473,18 +503,41 @@ public:
 
             std::vector<float> pred_feat_chunk(pred_feat_seq.end() - 3 * config.patch_size * config.feat_dim, pred_feat_seq.end());
             std::vector<float> feat_pred = rearrangeVector(pred_feat_chunk, 1, 3, config.patch_size, config.feat_dim);
-            result.push_back(feat_pred);
+            // result.push_back(feat_pred);
+
+            int patch_len = config.patch_size * audio_vae.chunk_size;
+           
+            std::vector<float> decode_audio;
+            audio_vae.Decode(decode_audio, feat_pred);
+
+            if(decode_audio.size() > patch_len)
+            {
+                decode_audio.assign(decode_audio.end() - patch_len, decode_audio.end());
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(buffer_mutex);
+                wav_buffer.push_back(decode_audio);
+            }
+            buffer_cv.notify_one();
+            
+            if(i==max_len-1)
+            {
+                finished = true;
+            }
 
             std::vector<float> stop_flag;
             ret = stop_predictor.Forward(lm_hidden, stop_flag);
             if(ret!=0)
             {
                 ALOGE("stop_predictor.Forward failed");
+                finished = true;
                 return -1;
             }
 
             if(i > min_len && stop_flag[0]==1)
             {
+                finished = true;
                 break;
             }
 
@@ -499,6 +552,7 @@ public:
             if(ret!=0)
             {
                 ALOGE("base_lm.ForwardStep failed");
+                finished = true;
                 return -1;
             }
 
@@ -522,6 +576,7 @@ public:
             if(ret!=0)
             {
                 ALOGE("residual_lm.ForwardStep failed");
+                finished = true;
                 return -1;
             }
 
@@ -530,6 +585,7 @@ public:
             position_id += 1;
         }
 
+        finished = true;
         return 0;
     }
     
