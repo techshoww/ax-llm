@@ -31,8 +31,10 @@ private:
     
 
 public:
-    bool Init(const std::string &path_axmodel, int in_size_axmodel, int out_size_axmodel)
+    bool Init(const std::string &path_axmodel, int in_size, int out_size)
     {
+        in_size_axmodel = in_size;
+        out_size_axmodel = out_size;
         int ret;
         ret = model.init(path_axmodel.c_str(), false);
         if (ret != 0)
@@ -71,7 +73,7 @@ public:
 
     int ForwardStep(void * p_in , void * p_out)
     {
-        void * p = model.get_input("hidden").pVirAddr;
+        void * p = model.get_input(0).pVirAddr;
         memcpy(p, p_in, in_size_axmodel * sizeof(float));   
 
         model.inference();

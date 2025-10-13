@@ -108,7 +108,7 @@ public:
             }
 
             ret = encoder.Forward(io_encoder, false);
-            if(!ret)
+            if(ret!=0)
             {
                 ALOGE("encoder Forward failed");
                 return -1;

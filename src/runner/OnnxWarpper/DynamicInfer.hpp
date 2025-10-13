@@ -14,8 +14,10 @@ protected:
     Ort::Env env_;
     Ort::SessionOptions session_options_;
     std::unique_ptr<Ort::Session> session_;
-    std::vector<char *> input_names_;
-    std::vector<char *> output_names_;
+    std::vector<std::string> input_names_str;
+    std::vector<std::string> output_names_str;
+    std::vector<const char *> input_names_;
+    std::vector<const char *> output_names_;
     std::string model_name_;
 
 public:
@@ -65,15 +67,20 @@ protected:
         // 获取输入名称
         size_t input_count = session_->GetInputCount();
         for (size_t i = 0; i < input_count; i++) {
-            input_names_.push_back(session_->GetInputNameAllocated(i, allocator).get());
-            ALOGI("input name %s",session_->GetInputNameAllocated(i, allocator).get());
+            input_names_str.push_back(std::string(session_->GetInputNameAllocated(i, allocator).get()));
+        }
+        for (size_t i = 0; i < input_count; i++) {
+            input_names_.push_back(input_names_str[i].c_str());
         }
         
         // 获取输出名称
         size_t output_count = session_->GetOutputCount();
         for (size_t i = 0; i < output_count; i++) {
-            output_names_.push_back(session_->GetOutputNameAllocated(i, allocator).get());
-            ALOGI("output name %s",session_->GetOutputNameAllocated(i, allocator).get());
+            output_names_str.push_back(std::string(session_->GetOutputNameAllocated(i, allocator).get()));
+        }
+
+        for (size_t i = 0; i < output_count; i++) {
+            output_names_.push_back(output_names_str[i].c_str());
         }
     }
     

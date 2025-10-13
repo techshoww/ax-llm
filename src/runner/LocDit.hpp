@@ -97,13 +97,13 @@ public:
         
 
         int ret = decoder.Forward(out1_part1, false);
-        if(!ret)
+        if(ret!=0)
         {
             ALOGE("decoder Forward failed");
             return -1;
         }
         ret = decoder.Forward(out2_part1, false);
-        if(!ret)
+        if(ret!=0)
         {
             ALOGE("decoder Forward failed");
             return -1;

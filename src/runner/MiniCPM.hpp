@@ -204,7 +204,7 @@ public:
 
         int input_embed_num = text_embed.size() / _attr.tokens_embed_size;
         int prefill_split_num = ceil((double)input_embed_num / _attr.prefill_token_num);
-        ALOGI("input token num : %d, prefill_split_num : %d", input_embed_num, prefill_split_num);
+        
         if (input_embed_num > _attr.prefill_max_token_num)
         {
             ALOGE("input token num(%d) > prefill_max_token_num(%d)", input_embed_num, _attr.prefill_max_token_num);

@@ -143,7 +143,6 @@ public:
 
     int Encode(std::vector<float> &output, std::vector<float> &audio_data, int sample_rate=16000)
     {
-        ALOGI("audio vae encode");
         if(_sample_rate!=sample_rate)
         {
             ALOGE("Just support sample_rate=%d",_sample_rate);
@@ -151,7 +150,6 @@ public:
         }
 
         output = encoder->inference(audio_data);
-        ALOGI("audio vae encode end");
         return 0;
     }
 

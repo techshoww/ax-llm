@@ -22,7 +22,7 @@ struct CfmConfig
 class UnifiedCFM
 {
 private:
-    int in_channels;
+    int _in_channels;
     std::vector<float> rand_noise;      // shape: (1, in_channels, 2)
     // std::vector<float> t_span;
     LocDit estimator;
@@ -37,7 +37,7 @@ public:
     {
         int ret;
 
-        in_channels = in_channels;
+        _in_channels = in_channels;
         ret = init_noise(dir_axmodels);
         if(ret!=0)
         {
@@ -94,15 +94,15 @@ public:
                     int cfg_value, bool use_cfg_zero_star=true)
     {
 
-        int len = x.size()/in_channels;
+        int len = x.size()/_in_channels;
         float t = t_span[0];
         float dt = t_span[0] - t_span[1];
 
-        std::vector<float> x_in(2*in_channels*len, 0);
-        std::vector<float> mu_in(2*in_channels*len,0);
+        std::vector<float> x_in(2*_in_channels*len, 0);
+        std::vector<float> mu_in(2*mu.size(),0);
         std::vector<float> t_in(2,0);
-        std::vector<float> cond_in(2*in_channels*len, 0);
-        std::vector<float> dphi_dt(2*in_channels*len, 0);
+        std::vector<float> cond_in(2*_in_channels*len, 0);
+        std::vector<float> dphi_dt(2*_in_channels*len, 0);
         
         int zero_init_steps = std::max(1, int(t_span.size() * 0.04));
         float st_star = 1.0;
@@ -131,8 +131,8 @@ public:
 
                 if(use_cfg_zero_star)
                 {
-                    std::vector<float> positive_flat(dphi_dt.begin(), dphi_dt.begin()+in_channels*len);
-                    std::vector<float> negative_flat(dphi_dt.begin()+in_channels*len, dphi_dt.end());
+                    std::vector<float> positive_flat(dphi_dt.begin(), dphi_dt.begin()+_in_channels*len);
+                    std::vector<float> negative_flat(dphi_dt.begin()+_in_channels*len, dphi_dt.end());
                     st_star = OptimizedScale(positive_flat, negative_flat);
                 }
                 else
@@ -140,14 +140,14 @@ public:
                     st_star = 1.0;
                 }
 
-                for(int i=0; i<in_channels*len; i++)
+                for(int i=0; i<_in_channels*len; i++)
                 {
-                    dphi_dt[i] = dphi_dt[in_channels*len + i] * st_star + cfg_value * (dphi_dt[i] - dphi_dt[in_channels*len + i] * st_star);
+                    dphi_dt[i] = dphi_dt[_in_channels*len + i] * st_star + cfg_value * (dphi_dt[i] - dphi_dt[_in_channels*len + i] * st_star);
                 }
 
             }
 
-            for(int i=0; i<in_channels*len; i++)
+            for(int i=0; i<_in_channels*len; i++)
             {
                 x[i] = x[i] - dt * dphi_dt[i];
             }
