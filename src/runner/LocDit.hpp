@@ -92,18 +92,17 @@ public:
         std::vector<unsigned short> out1_part1(5 * decoder._attr.hidden_size, 0);
         std::vector<unsigned short> out2_part1(5 * decoder._attr.hidden_size, 0);
 
-        p = part1.get_output(0).pVirAddr;
-    
+        float * pf = (float *)(part1.get_output(0).pVirAddr);
 
         // float32 to bfloat16
         for(int j=0; j<out1_part1.size(); j++)
         {
-            out1_part1[j] = bfloat16(((float *)p)[j]).data;
+            out1_part1[j] = bfloat16(pf[j]).data;
         }
 
         for(int j=0; j<out2_part1.size(); j++)
         { 
-            out2_part1[j] = bfloat16(((float *)p)[ 5 * decoder._attr.hidden_size + j]).data;
+            out2_part1[j] = bfloat16(pf[ 5 * decoder._attr.hidden_size + j]).data;
         }
         
 
@@ -113,6 +112,7 @@ public:
             ALOGE("decoder Forward failed");
             return -1;
         }
+        
         ret = decoder.Forward(out2_part1, false);
         if(ret!=0)
         {
@@ -120,20 +120,19 @@ public:
             return -1;
         }
 
-        p = part3.get_input("hidden").pVirAddr;
+        pf = (float *)(part3.get_input("hidden").pVirAddr);
         
         // bfloat16 to float32 
-
         for(int j=0; j<5 * decoder._attr.hidden_size; j++)
         {
             unsigned int tmp = out1_part1[j] << 16;
-            ((float *)p)[j] = *reinterpret_cast<float *>(&tmp);
+            pf[j] = *reinterpret_cast<float *>(&tmp);
         }
 
         for(int j=0; j<5 * decoder._attr.hidden_size; j++)
         {
             unsigned int tmp = out2_part1[j] << 16;
-            ((float *)p)[5 * decoder._attr.hidden_size + j] = *reinterpret_cast<float *>(&tmp);
+            pf[5 * decoder._attr.hidden_size + j] = *reinterpret_cast<float *>(&tmp);
         }
 
         part3.inference();

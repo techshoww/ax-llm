@@ -92,6 +92,10 @@ function(build_exec name main_source)
                     src/runner/utils/mrope.cpp
                     src/runner/utils/slice_3d.tpp
                     )
+    if(DEBUG)
+        message(STATUS "Debug mode is enabled for target: ${name}")
+        target_compile_definitions(${name} PRIVATE DEBUG)
+    endif()
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
     target_link_libraries(${name} ${OpenCV_LIBS})

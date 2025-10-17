@@ -504,7 +504,7 @@ public:
         savetxt("res_lm_output.txt", out_res_lm_fp32, '\n');
         #endif 
 
-        std::vector<unsigned short> residual_hidden(out_res_lm.end() - hidden_size, out_res_lm.end());
+        std::vector<unsigned short> residual_hidden(io_res_lm.end() - hidden_size, io_res_lm.end());
 
         #ifdef DEBUG
         std::vector<float> residual_hidden_fp32(residual_hidden.size());
@@ -692,9 +692,10 @@ public:
 
             #ifdef DEBUG
             savetxt(std::string("fsq_layer_input_")+std::to_string(i)+".txt", lm_hidden, '\n');
-            fsq_layer.Forward(lm_hidden, lm_hidden);
             #endif 
 
+            fsq_layer.Forward(lm_hidden, lm_hidden);
+            
             #ifdef DEBUG
             savetxt(std::string("fsq_layer_output_")+std::to_string(i)+".txt", lm_hidden, '\n');
             #endif 
