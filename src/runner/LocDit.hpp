@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <filesystem> 
 #include "bfloat16.hpp"
 #include "Tokenizer/Tokenizer.hpp"
 #include "LLMEmbedSelector.hpp"
@@ -67,6 +68,16 @@ public:
 
     int Forward(std::vector<float> &x, std::vector<float> &mu, std::vector<float> &t, std::vector<float> &cond, std::vector<float> &output)
     {
+
+        #ifdef DEBUG
+        if(!std::filesystem::exists("loc_dit_x.txt"))
+        {
+            savetxt("loc_dit_x.txt", x, '\n');
+            savetxt("loc_dit_mu.txt", mu, '\n');
+            savetxt("loc_dit_cond.txt", cond, '\n');
+        }
+        #endif
+
         void * p = part1.get_input("x").pVirAddr;
         memcpy(p, x.data(), x.size() * sizeof(float));
         p = part1.get_input("mu").pVirAddr;
@@ -127,7 +138,7 @@ public:
 
         part3.inference();
 
-        auto &out_part3 = part1.get_output(0);
+        auto &out_part3 = part3.get_output(0);
         output.resize(out_part3.nSize/sizeof(float));
         memcpy(output.data(), out_part3.pVirAddr, out_part3.nSize);
 

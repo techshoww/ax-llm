@@ -123,9 +123,15 @@ public:
 
                 int ret = -1;
                 ret = estimator.Forward(x_in, mu_in, t_in, cond_in, dphi_dt);
+                
+                #ifdef DEBUG
+                if(!std::filesystem::exists(std::string("SolveEuler_dphi_dt_")+std::to_string(step)+".txt"))
+                    savetxt(std::string("SolveEuler_dphi_dt_")+std::to_string(step)+".txt", dphi_dt, '\n');
+                #endif 
+
                 if(ret!=0)
                 {
-                    ALOGE("UnifiedCFM estimator Foward failed");
+                    ALOGE("UnifiedCFM estimator Forward failed");
                     return -1;
                 }
 
@@ -152,7 +158,12 @@ public:
                 x[i] = x[i] - dt * dphi_dt[i];
             }
             t = t - dt;
-
+            
+            #ifdef DEBUG
+            if(!std::filesystem::exists(std::string("SolveEuler_x_")+std::to_string(step)+".txt"))
+                savetxt(std::string("SolveEuler_x_")+std::to_string(step)+".txt", x, '\n');
+            #endif 
+            
             if(step < t_span.size()-1)
             {
                 dt = t - t_span[step + 1];

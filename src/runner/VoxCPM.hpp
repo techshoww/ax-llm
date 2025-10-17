@@ -129,12 +129,20 @@ public:
         decoder_lm_config.filename_post_axmodel = config.dir_decoder_estimator + "/" + "MiniCPMForCausalLM_post.axmodel";
         decoder_lm_config.axmodel_num = config.dit_config.num_layers;
         decoder_lm_config.hidden_size = config.dit_config.hidden_dim;
-        feat_decoder.Init(config.feat_dim, config.dit_config.cfm_config, decoder_lm_config, config.dir_axmodels);
+        if(!feat_decoder.Init(config.feat_dim, config.dit_config.cfm_config, decoder_lm_config, config.dir_axmodels))
+        {
+            ALOGE("feat_decoder.Init failed");
+            return false;
+        }
         
         fsq_layer.Init(config.dir_axmodels+"/fsq_layer.axmodel", config.lm_config.hidden_size, config.lm_config.hidden_size);
         enc_to_lm_proj.Init(config.dir_axmodels+"/enc_to_lm_proj.axmodel", config.encoder_config.hidden_dim, config.lm_config.hidden_size);
         lm_to_dit_proj.Init(config.dir_axmodels+"/lm_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
-        res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
+        if(!res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim))
+        {
+            ALOGE("res_to_dit_proj.Init failed");
+            return false;
+        }
         stop_predictor.Init(config.dir_axmodels+"/stop_predictor.axmodel", config.lm_config.hidden_size, 1);
 
         audio_vae.Init(config.dir_axmodels);
@@ -194,7 +202,12 @@ public:
                 return -1;
             }
         }   
-
+        
+        #ifdef DEBUG
+        savetxt<int>(std::string("prompt_text_proken.txt"), prompt_text_proken, '\n');
+        savetxt<float>(std::string("prompt_audio_feat.txt"), prompt_audio_feat, '\n');
+        #endif
+        
         ret = GenerateWithPromptCache(wav_buffer, buffer_mutex, buffer_cv, finished,
             text, prompt_text_proken, prompt_audio_feat, 2, max_length, inference_timesteps, cfg_value);
         if(ret !=0)
@@ -226,10 +239,19 @@ public:
             int padding_size = patch_len - remainder;
             audio.insert(audio.end(), padding_size, 0.0f);
         }
+        
+        #ifdef DEBUG
+        savetxt("audio.txt", audio, '\n');
+        readtxt("../../VoxCPM/audio.txt", audio);
+        #endif 
 
         std::vector<float> audio_feat;
         audio_vae.Encode(audio_feat, audio);
-
+        
+        #ifdef DEBUG
+        savetxt("audio_feat.txt", audio_feat, '\n');
+        #endif 
+        
         int N = audio_feat.size() / audio_vae.latent_dim;
         int T = audio_feat.size() / (audio_vae.latent_dim * config.patch_size);
         const int output_size = (T - 1) * config.patch_size * audio_vae.latent_dim;
@@ -293,20 +315,6 @@ public:
             return -1;
         }
 
-        // int patch_len = config.patch_size * audio_vae.chunk_size;
-        // for(int i=0; i<pred_feat.size(); i++)
-        // {
-        //     std::vector<float> decode_audio;
-        //     audio_vae.decode(decode_audio, pred_feat[i]);
-
-        //     if(decode_audio.size() > patch_len)
-        //     {
-        //         decode_audio.assign(decode_audio.end() - patch_len, decode_audio.end());
-        //     }
-        //     result.push_back(decode_audio);
-        //     // 未完
-        // }
-
         return 0;
     }
 
@@ -319,15 +327,25 @@ public:
                     int min_len=2, int max_len=2000, int inference_timesteps=10, float cfg_value=2.0)
     {
         int ret;
+
+        #ifdef DEBUG
+        savetxt("text_token.txt", text, '\n');
+        savetxt("feat.txt", feat, '\n');
+        #endif 
+
         std::vector<float> feat_embed;
-        ret = feat_encoder.Foward(feat, feat_embed);
+        ret = feat_encoder.Forward(feat, feat_embed);
         if(ret!=0)
         {
             ALOGE("feat_encoder failed");
             finished = true;
             return -1;
         }
-
+        
+        #ifdef DEBUG
+        savetxt("feat_embed1.txt", feat_embed, '\n');
+        #endif 
+        
         ret = enc_to_lm_proj.Forward(feat_embed, feat_embed);
         if(ret!=0)
         {
@@ -335,6 +353,10 @@ public:
             finished = true;
             return -1;
         }
+
+        #ifdef DEBUG
+        savetxt("feat_embed2.txt", feat_embed, '\n');
+        #endif 
 
         std::vector<unsigned short> text_embed;
         base_lm.TextToken2Embeds(text, text_embed);
@@ -381,6 +403,17 @@ public:
             }
         }
 
+        #ifdef DEBUG
+        std::vector<float> combined_embed_fp32(combined_embed.size(), 0.0f);
+        for(int i=0; i<combined_embed.size(); i++)
+        {
+            // bfloat16 to float32
+            unsigned int tmp_u32 = combined_embed[i] << 16;
+            combined_embed_fp32[i] = *reinterpret_cast<float *>(&tmp_u32);
+        }
+        savetxt("combined_embed.txt", combined_embed_fp32, '\n');
+        #endif 
+
         ret = base_lm.Forward(combined_embed, true);
         if(ret!=0)
         {
@@ -398,6 +431,10 @@ public:
             unsigned int tmp_u32 = combined_embed[i] << 16;
             enc_outputs[i] = *reinterpret_cast<float *>(&tmp_u32);
         }
+
+        #ifdef DEBUG
+        savetxt("enc_outputs.txt", enc_outputs, '\n');
+        #endif 
 
         std::vector<float> fsq_outputs;
         ret = fsq_layer.Forward(enc_outputs, fsq_outputs);
@@ -419,6 +456,10 @@ public:
             }
         }
 
+        #ifdef DEBUG
+        savetxt("enc_outputs1.txt", enc_outputs, '\n');
+        #endif 
+
         std::vector<float> lm_hidden(enc_outputs.end() - hidden_size, enc_outputs.end());
 
         std::vector<unsigned short> io_res_lm(enc_outputs.size());
@@ -433,6 +474,17 @@ public:
             }
         }
 
+        #ifdef DEBUG
+        std::vector<float> io_res_lm_fp32(io_res_lm.size());
+        for(int i=0; i<io_res_lm_fp32.size(); i++)
+        {
+            // bfloat16 to float32
+            unsigned int tmp_u32 = io_res_lm[i] << 16;
+            io_res_lm_fp32[i] = *reinterpret_cast<float *>(&tmp_u32);
+        }
+        savetxt("res_lm_input.txt", io_res_lm_fp32, '\n');
+        #endif 
+
         ret = residual_lm.Forward(io_res_lm, true);
         if(ret!=0)
         {
@@ -441,8 +493,29 @@ public:
             return -1;
         }
 
+        #ifdef DEBUG
+        std::vector<float> out_res_lm_fp32(io_res_lm.size());
+        for(int i=0; i<out_res_lm_fp32.size(); i++)
+        {
+            // bfloat16 to float32
+            unsigned int tmp_u32 = io_res_lm[i] << 16;
+            out_res_lm_fp32[i] = *reinterpret_cast<float *>(&tmp_u32);
+        }
+        savetxt("res_lm_output.txt", out_res_lm_fp32, '\n');
+        #endif 
 
-        std::vector<unsigned short> residual_hidden(io_res_lm.end() - hidden_size, io_res_lm.end());
+        std::vector<unsigned short> residual_hidden(out_res_lm.end() - hidden_size, out_res_lm.end());
+
+        #ifdef DEBUG
+        std::vector<float> residual_hidden_fp32(residual_hidden.size());
+        for(int i=0; i<residual_hidden.size(); i++)
+        {
+            // bfloat16 to float32
+            unsigned int tmp_u32 = residual_hidden[i] << 16;
+            residual_hidden_fp32[i] = *reinterpret_cast<float *>(&tmp_u32);
+        }
+        savetxt("residual_hidden.txt", residual_hidden_fp32, '\n');
+        #endif 
 
         int position_id = prefill_len;
 
@@ -450,11 +523,20 @@ public:
 
         std::vector<float> pred_feat_seq;
         pred_feat_seq.reserve( 4 * 3 * config.patch_size * config.feat_dim); // 4 可以换成成其他值
+        
+        // #ifdef DEBUG
+        max_len = 100;
+        // #endif 
+
         for(int i=0; i< max_len; i++)
         {
             std::vector<float> dit_hidden_1;
             ret = lm_to_dit_proj.Forward(lm_hidden, dit_hidden_1);
-            
+
+            #ifdef DEBUG
+            savetxt(std::string("dit_hidden_1_")+std::to_string(i)+".txt", dit_hidden_1, '\n');
+            #endif 
+
             std::vector<float> residual_hidden_fp32(residual_hidden.size());
             // bfloat16 to float32
             for(int j=0; j<residual_hidden.size(); j++)
@@ -463,7 +545,16 @@ public:
                 residual_hidden_fp32[j] = *reinterpret_cast<float *>(&tmp_u32);
             }
             std::vector<float> dit_hidden_2;
+
+            #ifdef DEBUG
+            savetxt(std::string("residual_hidden_fp32_")+std::to_string(i)+".txt", residual_hidden_fp32, '\n');
+            #endif 
+
             ret = res_to_dit_proj.Forward(residual_hidden_fp32, dit_hidden_2);
+
+            #ifdef DEBUG
+            savetxt(std::string("dit_hidden_2_")+std::to_string(i)+".txt", dit_hidden_2, '\n');
+            #endif 
 
             for(int j=0; j<dit_hidden_1.size(); j++)
             {
@@ -472,6 +563,12 @@ public:
 
             std::vector<float> out_decoder;
             std::vector<float> cond = transposeVector(prefix_feat_cond, config.patch_size, config.feat_dim);
+
+            #ifdef DEBUG
+            savetxt(std::string("cond_")+std::to_string(i)+".txt", cond, '\n');
+            savetxt(std::string("dit_hidden_")+std::to_string(i)+".txt", dit_hidden_1, '\n');
+            #endif 
+
             ret = feat_decoder.Forward(dit_hidden_1, cond, inference_timesteps, cfg_value, 1.0, true, out_decoder);            
             if(ret!=0)
             {
@@ -479,10 +576,19 @@ public:
                 finished = true;
                 return -1;
             }
+            
+            #ifdef DEBUG
+            savetxt(std::string("pred_feat_before_transpose_")+std::to_string(i)+".txt", out_decoder, '\n');
+            #endif 
 
             std::vector<float> pred_feat = transposeVector(out_decoder, config.feat_dim, config.patch_size); // (64,2) to (2,64)
+
+            #ifdef DEBUG
+            savetxt(std::string("pred_feat_")+std::to_string(i)+".txt", pred_feat, '\n');
+            #endif 
+
             std::vector<float> curr_embed;
-            ret = feat_encoder.Foward(pred_feat, curr_embed);
+            ret = feat_encoder.Forward(pred_feat, curr_embed);
             if(ret!=0)
             {
                 ALOGE("feat_encoder.Forward failed");
@@ -490,8 +596,16 @@ public:
                 return -1;
             }
             
+            #ifdef DEBUG
+            savetxt(std::string("enc_to_lm_proj_input_")+std::to_string(i)+".txt", curr_embed, '\n');
+            #endif 
+
             ret = enc_to_lm_proj.Forward(curr_embed, curr_embed);
-            
+
+            #ifdef DEBUG
+            savetxt(std::string("enc_to_lm_proj_output_")+std::to_string(i)+".txt", curr_embed, '\n');
+            #endif 
+
             if(pred_feat_seq.size() >= 4 * 3 * config.patch_size * config.feat_dim - config.patch_size * config.feat_dim)
             {
                 pred_feat_seq.erase(pred_feat_seq.end() - 2 * config.patch_size * config.feat_dim, pred_feat_seq.end());  // 只保留最后 2 个
@@ -501,9 +615,18 @@ public:
              
             prefix_feat_cond = std::move(pred_feat);
 
-            std::vector<float> pred_feat_chunk(pred_feat_seq.end() - 3 * config.patch_size * config.feat_dim, pred_feat_seq.end());
-            std::vector<float> feat_pred = rearrangeVector(pred_feat_chunk, 1, 3, config.patch_size, config.feat_dim);
-            // result.push_back(feat_pred);
+            int offset = std::min( i+1, 3);
+            std::vector<float> pred_feat_chunk(pred_feat_seq.end() - offset * config.patch_size * config.feat_dim, pred_feat_seq.end());
+
+            #ifdef DEBUG
+            savetxt(std::string("pred_feat_chunk_")+std::to_string(i)+".txt", pred_feat_chunk, '\n');
+            #endif 
+
+            std::vector<float> feat_pred = rearrangeVector(pred_feat_chunk, 1, offset, config.patch_size, config.feat_dim);
+            
+            #ifdef DEBUG
+            savetxt(std::string("feat_pred_")+std::to_string(i)+".txt", feat_pred, '\n');
+            #endif 
 
             int patch_len = config.patch_size * audio_vae.chunk_size;
            
@@ -526,6 +649,10 @@ public:
                 finished = true;
             }
 
+            #ifdef DEBUG
+            savetxt(std::string("stop_input_")+std::to_string(i)+".txt", lm_hidden, '\n');
+            #endif 
+
             std::vector<float> stop_flag;
             ret = stop_predictor.Forward(lm_hidden, stop_flag);
             if(ret!=0)
@@ -534,8 +661,8 @@ public:
                 finished = true;
                 return -1;
             }
-
-            if(i > min_len && stop_flag[0]==1)
+            
+            if(i > min_len && int(stop_flag[0])==1)
             {
                 finished = true;
                 break;
@@ -563,7 +690,14 @@ public:
                 lm_hidden[j] = *reinterpret_cast<float *>(&tmp_u32);
             }
 
+            #ifdef DEBUG
+            savetxt(std::string("fsq_layer_input_")+std::to_string(i)+".txt", lm_hidden, '\n');
             fsq_layer.Forward(lm_hidden, lm_hidden);
+            #endif 
+
+            #ifdef DEBUG
+            savetxt(std::string("fsq_layer_output_")+std::to_string(i)+".txt", lm_hidden, '\n');
+            #endif 
             
             std::vector<unsigned short> io_res_lm(lm_hidden.size());
             // float32  to bfloat16

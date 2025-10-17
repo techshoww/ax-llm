@@ -81,7 +81,7 @@ public:
         encoder.Deinit();
     }
 
-    int Foward(std::vector<float> &x, std::vector<float> & out)
+    int Forward(std::vector<float> &x, std::vector<float> & out)
     {
         int ret;
         int T = x.size()/(patch_size*latent_dim);
@@ -107,6 +107,20 @@ public:
                 io_encoder[hidden_size + j] = bfloat16(out_proj[j]).data;
             }
 
+            #ifdef DEBUG
+            if(T>1 && i==0)
+            {
+                std::vector<float> in_encoder_fp32((1+patch_size)*hidden_size, 0);
+                for(int j=0; j<(1+patch_size)*hidden_size; j++)
+                {
+                    unsigned int tmp = io_encoder[j] << 16;
+                    in_encoder_fp32[j] = *reinterpret_cast<float *>(&tmp);
+                }
+                savetxt<float>("io_encoder_T0.txt", in_encoder_fp32, '\n');
+            }
+            #endif
+
+            std::vector<unsigned short> out_encoder;
             ret = encoder.Forward(io_encoder, false);
             if(ret!=0)
             {
@@ -114,6 +128,19 @@ public:
                 return -1;
             }
 
+            #ifdef DEBUG
+            if(T>1 && i==0)
+            {
+                std::vector<float> out_encoder_fp32((1+patch_size)*hidden_size, 0);
+                for(int j=0; j<(1+patch_size)*hidden_size; j++)
+                {
+                    unsigned int tmp = io_encoder[j] << 16;
+                    out_encoder_fp32[j] = *reinterpret_cast<float *>(&tmp);
+                }
+                savetxt<float>("io_encoder_T0_enc.txt", out_encoder_fp32, '\n');
+            }
+            #endif 
+            
             // bfloat16 to float32
             for(int j=0; j<hidden_size; j++)
             {

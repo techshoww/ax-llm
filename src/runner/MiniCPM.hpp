@@ -36,7 +36,7 @@ struct LLMAttrType
     int prefill_grpid = -1;
 
     TokenizerType tokenizer_type = TKT_HTTP;
-    std::string url_tokenizer = "http://127.0.0.1:12345";
+    std::string url_tokenizer;
     bool b_bos = false, b_eos = false;
     std::string filename_tokens_embed = "model.embed_tokens.weight.bfloat16.bin"; 
     int tokens_embed_num = 73448;
@@ -82,13 +82,16 @@ public:
         ALOGI("LLM init start");
         t_cqdm cqdm = create_cqdm(attr.axmodel_num + 3, 32);
         this->_attr = attr;
-        tokenizer = CreateTokenizer(attr.tokenizer_type);
-        if (!tokenizer->Init(attr.url_tokenizer, attr.b_bos, attr.b_eos))
+        if(!attr.url_tokenizer.empty())
         {
-            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.url_tokenizer.c_str(), attr.b_bos, attr.b_eos);
-            return false;
+            tokenizer = CreateTokenizer(attr.tokenizer_type);
+            if (!tokenizer->Init(attr.url_tokenizer, attr.b_bos, attr.b_eos))
+            {
+                ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.url_tokenizer.c_str(), attr.b_bos, attr.b_eos);
+                return false;
+            }
+            update_cqdm(&cqdm, 0, "count", "tokenizer init ok");
         }
-        update_cqdm(&cqdm, 0, "count", "tokenizer init ok");
 
         if (!embed_selector.Init(attr.filename_tokens_embed, attr.tokens_embed_num, attr.tokens_embed_size, attr.b_use_mmap_load_embed))
         {
@@ -227,42 +230,44 @@ public:
             _attr.prefill_grpid = p + 1;
             kv_cache_num = p * _attr.prefill_token_num;
             std::vector<unsigned short> mask_tmp;
-            bfloat16 bf16 = -65536.f;
-            mask_tmp.resize(1 * _attr.prefill_token_num * (kv_cache_num + _attr.prefill_token_num), bf16.data);
+
             int input_num_token = _attr.prefill_token_num;
             if (p == prefill_split_num - 1)
             {
                 input_num_token = input_embed_num - p * _attr.prefill_token_num;
             }
 
-            ALOGI("input_num_token:%d", input_num_token);
-            for (size_t i = 0; i < _attr.prefill_token_num; i++)
+            bfloat16 bf16 = -65536.f;
+            mask_tmp.resize(1 * _attr.prefill_token_num * (kv_cache_num + _attr.prefill_token_num), bf16.data);
+            if(is_causal)
             {
-                if (i < input_num_token)
+                
+                for (size_t i = 0; i < _attr.prefill_token_num; i++)
                 {
-                    int mask_current_start = kv_cache_num;
-                    auto mask_ptr = mask_tmp.data() + i * (kv_cache_num + _attr.prefill_token_num);
+                    if (i < input_num_token)
+                    {
+                        int mask_current_start = kv_cache_num;
+                        auto mask_ptr = mask_tmp.data() + i * (kv_cache_num + _attr.prefill_token_num);
 
-                    for (int j = 0; j < _attr.precompute_len + p * _attr.prefill_token_num; j++)
-                    {
-                        mask_ptr[j] = 0;
-                    }
-                    
-                    if(is_causal)
-                    {
+                        for (int j = 0; j < _attr.precompute_len + p * _attr.prefill_token_num; j++)
+                        {
+                            mask_ptr[j] = bfloat16(0.f).data;
+                        }
                         for (int j = mask_current_start; j < mask_current_start + i + 1; j++)
                         {
-                            mask_ptr[j] = 0;
+                            mask_ptr[j] = bfloat16(0.f).data;
                         }
                     }
-                    else
+                }
+            }
+            else
+            {
+                for(int i=0; i< _attr.prefill_token_num; i++)
+                {
+                    for(int j=0; j<input_embed_num; j++)
                     {
-                        for (int j = mask_current_start; j < mask_current_start + _attr.prefill_token_num ; j++)
-                        {
-                            mask_ptr[j] = 0;
-                        }
+                        mask_tmp[i*(kv_cache_num + _attr.prefill_token_num) +j] = bfloat16(0.f).data;
                     }
-                    
                 }
             }
 
@@ -371,7 +376,7 @@ public:
         std::vector<unsigned short> mask(_attr.kv_cache_num + 1, bf16.data);
         for (size_t i = 0; i < position_id; i++)
         {
-            mask[i] = 0;
+            mask[i] = bfloat16(0.f).data;
         }
         unsigned int indices = position_id;
         if (b_stop)

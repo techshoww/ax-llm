@@ -56,7 +56,7 @@ int readtxt(const std::string& filename, std::vector<T>& data) {
         return -1;
     }
 
-    
+    data.clear();
     std::string line;
     while (std::getline(file, line)) {
         // 跳过空行
