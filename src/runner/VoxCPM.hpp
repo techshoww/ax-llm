@@ -92,8 +92,11 @@ private:
 
     bool b_stop = false;
 
+    std::vector<int> prompt_text_proken;
+    std::vector<float> prompt_audio_feat;
+
 public:
-    bool Init(VoxCPMConfig &config )
+    bool Init(VoxCPMConfig &config,  const std::string &prompt_text, const std::string &prompt_wav_path )
     {
         ALOGI("VoxCPM init start");
         
@@ -147,6 +150,17 @@ public:
 
         audio_vae.Init(config.dir_axmodels);
 
+        
+        if(!prompt_text.empty() && !prompt_wav_path.empty() )
+        {
+            int ret = BuildPromptCache(prompt_text_proken, prompt_audio_feat, prompt_text, prompt_wav_path);
+            if(ret !=0)
+            {
+                ALOGE("BuildPromptCache failed");
+                return false;
+            }
+        }   
+
         ALOGI("VoxCPM init finised");
         return true;
     }
@@ -174,7 +188,7 @@ public:
                         std::mutex& buffer_mutex,
                         std::condition_variable& buffer_cv,
                         std::atomic<bool>& finished,
-                        const std::string &text, const std::string &prompt_text, const std::string &prompt_wav_path,
+                        const std::string &text,
                         float cfg_value=2.0, int inference_timesteps=10, int max_length=4096, 
                         bool normalize=false, bool denoise=false )
     {
@@ -190,18 +204,6 @@ public:
         }
 
         int ret;
-        std::vector<int> prompt_text_proken;
-        std::vector<float> prompt_audio_feat;
-
-        if(!prompt_text.empty() && !prompt_wav_path.empty() )
-        {
-            ret = BuildPromptCache(prompt_text_proken, prompt_audio_feat, prompt_text, prompt_wav_path);
-            if(ret !=0)
-            {
-                ALOGE("BuildPromptCache failed");
-                return -1;
-            }
-        }   
         
         #ifdef DEBUG
         savetxt<int>(std::string("prompt_text_proken.txt"), prompt_text_proken, '\n');

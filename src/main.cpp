@@ -41,7 +41,7 @@ void reset()
     WavBuffer().swap(g_wav_buffer);
 }
 
-int tts(const std::string &text, const std::string &prompt_text, const std::string &prompt_wav_path,
+int tts(const std::string &text,
         float cfg_value=2.0, int inference_timesteps=10, int max_length=4096)
 {
     std::vector<float> output;
@@ -51,9 +51,9 @@ int tts(const std::string &text, const std::string &prompt_text, const std::stri
     {
         // Lambda to capture the LLM instance and shared resources
         // This makes it easy to pass them to the thread
-        auto generate_thread_func = [&voxcpm,  &g_wav_buffer, &g_buffer_mutex, &g_buffer_cv, &g_llm_finished, &text, &prompt_text, &prompt_wav_path, &cfg_value, &inference_timesteps, &max_length]()
+        auto generate_thread_func = [&voxcpm,  &g_wav_buffer, &g_buffer_mutex, &g_buffer_cv, &g_llm_finished, &text, &cfg_value, &inference_timesteps, &max_length]()
         {
-            voxcpm.GenerateStreaming(g_wav_buffer, g_buffer_mutex, g_buffer_cv, g_llm_finished, text, prompt_text, prompt_wav_path, cfg_value, inference_timesteps, max_length);
+            voxcpm.GenerateStreaming(g_wav_buffer, g_buffer_mutex, g_buffer_cv, g_llm_finished, text, cfg_value, inference_timesteps, max_length);
         };
 
         // Start the LLM in a separate thread
@@ -200,14 +200,14 @@ int main(int argc, char *argv[])
     float cfg_value = cmd.get<float>("cfg_value");
     b_continue = cmd.get<bool>("continue");
 
-    if (!voxcpm.Init(config))
+    if (!voxcpm.Init(config, prompt_text, prompt_wav_path))
     {
         return -1;
     }
 
     if (text.size() > 0)
     {
-        tts(text, prompt_text, prompt_wav_path, cfg_value, n_timesteps);
+        tts(text, cfg_value, n_timesteps);
     }
 
     if (b_continue)
@@ -236,7 +236,7 @@ int main(int argc, char *argv[])
 
         fflush(stdout);
 
-        tts(text, prompt_text, prompt_wav_path, cfg_value, n_timesteps);
+        tts(text, cfg_value, n_timesteps);
     }
 
     voxcpm.Deinit();
