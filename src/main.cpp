@@ -31,49 +31,9 @@ void __sigExit(int iSigNo)
 {
     voxcpm.Stop();
     g_stop = true;
+    g_buffer_cv.notify_all();
     return;
 }
-
-// void simulate_llm()
-// {
-//     std::vector<int> tokens;
-//     readtxt("../../model_convert/llm_out_tokens.txt", tokens);
-
-//     std::cout << "[LLM Thread] Starting to generate tokens...\n";
-
-//     // Simulate generating a stream of tokens
-//     for (int &token : tokens)
-//     {
-//         // Simulate time taken to generate a token
-//         // std::this_thread::sleep_for(std::chrono::milliseconds(30));
-
-//         {
-//             // Acquire lock before modifying the shared buffer
-//             std::lock_guard<std::mutex> lock(g_buffer_mutex);
-
-//             // Optional: Backpressure - wait if buffer is full
-//             // This prevents the LLM from running too far ahead.
-//             // g_buffer_cv.wait(lock, [] { return g_wav_buffer.size() < MAX_BUFFER_SIZE; });
-
-//             // Add the generated token(s) to the buffer
-//             g_wav_buffer.push_back(token); // Add one token
-//             // Or add a batch: for(...) g_wav_buffer.push_back(...);
-
-//             std::cout << "[LLM Thread] Generated token " << g_wav_buffer.back()
-//                       << " (Buffer size: " << g_wav_buffer.size() << ")\n";
-//         } // Lock is automatically released here
-
-//         // Notify the consumer (token2wav) that new data might be available
-//         g_buffer_cv.notify_one();
-//     }
-
-//     // Signal that LLM generation is finished
-//     g_llm_finished = true;
-//     std::cout << "[LLM Thread] Finished generating tokens.\n";
-
-//     // Final notify to wake up the consumer if it's waiting
-//     g_buffer_cv.notify_all();
-// }
 
 void reset()
 {

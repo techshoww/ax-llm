@@ -26,7 +26,7 @@
 #include "LocEnc.hpp"
 #include "UnifiedCFM.hpp"
 #include "SimpleLayer.hpp"
-#include "SimpleLayerOnnx.hpp"
+#include "SimpleLayerONNX.hpp"
 #include "AudioVAE.hpp"
 
 using WavBuffer = std::deque<std::vector<float>>;
@@ -81,11 +81,11 @@ private:
     MiniCPM residual_lm;
     LocEnc feat_encoder;
     UnifiedCFM feat_decoder;
-    SimpleLayerOnnx fsq_layer;
-    SimpleLayerOnnx enc_to_lm_proj;
-    SimpleLayerOnnx lm_to_dit_proj;
-    SimpleLayerOnnx res_to_dit_proj;
-    SimpleLayerOnnx stop_predictor;
+    SimpleLayer fsq_layer;
+    SimpleLayer enc_to_lm_proj;
+    SimpleLayer lm_to_dit_proj;
+    SimpleLayer res_to_dit_proj;
+    SimpleLayerONNX stop_predictor;
 
     VoxCPMConfig config;
     AudioVAE audio_vae;
@@ -115,7 +115,6 @@ public:
         residual_lm_config.template_filename_axmodel = config.dir_residual_lm + "/" + "MiniCPMForCausalLM_p64_l%d_together.axmodel";
         residual_lm_config.filename_post_axmodel = config.dir_residual_lm + "/" + "MiniCPMForCausalLM_post.axmodel";
         residual_lm_config.axmodel_num = config.residual_lm_num_layers;
-
         residual_lm.Init(residual_lm_config);
 
         LLMAttrType encoder_lm_config = config.lm_config;
@@ -136,10 +135,10 @@ public:
             return false;
         }
         
-        fsq_layer.Init(config.dir_axmodels+"/fsq_layer.onnx", config.lm_config.hidden_size, config.lm_config.hidden_size);
-        enc_to_lm_proj.Init(config.dir_axmodels+"/enc_to_lm_proj.onnx", config.encoder_config.hidden_dim, config.lm_config.hidden_size);
-        lm_to_dit_proj.Init(config.dir_axmodels+"/lm_to_dit_proj.onnx", config.lm_config.hidden_size, config.dit_config.hidden_dim);
-        if(!res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.onnx", config.lm_config.hidden_size, config.dit_config.hidden_dim))
+        fsq_layer.Init(config.dir_axmodels+"/fsq_layer.axmodel", config.lm_config.hidden_size, config.lm_config.hidden_size);
+        enc_to_lm_proj.Init(config.dir_axmodels+"/enc_to_lm_proj.axmodel", config.encoder_config.hidden_dim, config.lm_config.hidden_size);
+        lm_to_dit_proj.Init(config.dir_axmodels+"/lm_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim);
+        if(!res_to_dit_proj.Init(config.dir_axmodels+"/res_to_dit_proj.axmodel", config.lm_config.hidden_size, config.dit_config.hidden_dim))
         {
             ALOGE("res_to_dit_proj.Init failed");
             return false;
@@ -616,7 +615,7 @@ public:
 
             if(pred_feat_seq.size() >= 4 * 3 * config.patch_size * config.feat_dim - config.patch_size * config.feat_dim)
             {
-                pred_feat_seq.erase(pred_feat_seq.end() - 2 * config.patch_size * config.feat_dim, pred_feat_seq.end());  // 只保留最后 2 个
+                pred_feat_seq.erase(pred_feat_seq.begin(), pred_feat_seq.end() - 2 * config.patch_size * config.feat_dim);  // 只保留最后 2 个
             } 
 
             pred_feat_seq.insert(pred_feat_seq.end(), pred_feat.begin(), pred_feat.end());          
