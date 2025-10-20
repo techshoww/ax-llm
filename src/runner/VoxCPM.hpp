@@ -531,9 +531,6 @@ public:
         std::vector<float> pred_feat_seq;
         pred_feat_seq.reserve( 4 * 3 * config.patch_size * config.feat_dim); // 4 可以换成成其他值
         
-        // #ifdef DEBUG
-        max_len = 100;
-        // #endif 
 
         for(int i=0; i< max_len; i++)
         {
