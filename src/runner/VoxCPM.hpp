@@ -146,7 +146,7 @@ public:
             ALOGE("res_to_dit_proj.Init failed");
             return false;
         }
-        stop_predictor.Init(config.dir_axmodels+"/stop_predictor2.onnx", config.lm_config.hidden_size, 2);
+        stop_predictor.Init(config.dir_axmodels+"/stop_predictor.onnx", config.lm_config.hidden_size, 2);
 
         audio_vae.Init(config.dir_axmodels);
 

@@ -18,7 +18,16 @@ fi
 # build_dir 修改为自己想要的编译目录名称
 build_dir=build
 echo "build dir: ${build_dir}"
-mkdir ${build_dir}
+if [ -d "${build_dir}" ]; then
+    rm -r ${build_dir}/CMakeFiles
+    rm -r ${build_dir}/install/bin
+    rm -r ${build_dir}/cmake_install.cmake
+    rm -r ${build_dir}/CMakeCache.txt
+    rm -r ${build_dir}/main
+    rm -r ${build_dir}/Makefile
+else 
+    mkdir ${build_dir}
+fi
 cd ${build_dir}
 
 # 下载失败可以使用其他方式下载并放到在 $build_dir 目录，参考如下命令解压
