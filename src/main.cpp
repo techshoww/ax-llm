@@ -16,6 +16,8 @@
 #include "runner/utils/timer.hpp"
 #include "cmdline.hpp"
 #include "runner/utils/files.hpp"
+#include <ax_sys_api.h>
+#include <ax_engine_api.h>
 
 static LLM lLaMa;
 static Token2Wav lToken2Wav;
@@ -39,7 +41,7 @@ void __sigExit(int iSigNo)
 void simulate_llm()
 {
     std::vector<int> tokens;
-    readtxt("../../model_convert/llm_out_tokens.txt", tokens);
+    readtxt("../CosyVoice/llm_token_ids.txt", tokens);
 
     std::cout << "[LLM Thread] Starting to generate tokens...\n";
 
@@ -66,7 +68,7 @@ void simulate_llm()
         } // Lock is automatically released here
 
         // Notify the consumer (token2wav) that new data might be available
-        g_buffer_cv.notify_one();
+        // g_buffer_cv.notify_one();
     }
 
     // Signal that LLM generation is finished
@@ -74,7 +76,7 @@ void simulate_llm()
     std::cout << "[LLM Thread] Finished generating tokens.\n";
 
     // Final notify to wake up the consumer if it's waiting
-    g_buffer_cv.notify_all();
+    // g_buffer_cv.notify_all();
 }
 
 void reset()
@@ -108,6 +110,7 @@ int tts(
 
         // Start the LLM in a separate thread
         std::thread llm_thread(llm_thread_func);
+        // simulate_llm();
 
         int token_offset = 0;
         int prompt_token_len = prompt_speech_embeds_flow.size() / lToken2Wav.flow_embed_size;
@@ -120,7 +123,7 @@ int tts(
         int prompt_token_align_len = 75; // only support 75 now
 
         std::vector<float> prompt_speech_embeds_flow1;
-        prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin() + prompt_token_align_len * 512);
+        prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin() + prompt_token_align_len * lToken2Wav.flow_embed_size);
 
         std::vector<float> prompt_feat1;
         prompt_feat1.insert(prompt_feat1.begin(), prompt_feat.begin(), prompt_feat.begin() + prompt_token_align_len * 2 * 80);
@@ -176,9 +179,8 @@ int tts(
 
                 // TODO: 另起一个线程处理生成的音频
                 output.insert(output.end(), speech.begin(), speech.end());
-                std::string path = "output_" + std::to_string(i) + ".wav";
-
-                saveVectorAsWavFloat(speech, path, 24000, 1);
+                // std::string path = "output_" + std::to_string(i) + ".wav";
+                // saveVectorAsWavFloat(speech, path, 24000, 1);
                 i += 1;
             }
 
@@ -217,8 +219,8 @@ int tts(
         auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset - start, true);
         // TODO: 另起一个线程处理生成的音频
         output.insert(output.end(), speech.begin(), speech.end());
-        std::string path = "output_" + std::to_string(i) + ".wav";
-        saveVectorAsWavFloat(speech, path, 24000, 1);
+        // std::string path = "output_" + std::to_string(i) + ".wav";
+        // saveVectorAsWavFloat(speech, path, 24000, 1);
         saveVectorAsWavFloat(output, "output.wav", 24000, 1);
 
         ALOGI("tts total use time: %.3f s", time_total.cost() / 1000);
@@ -280,6 +282,16 @@ int main(int argc, char *argv[])
     std::string prompt_files = cmd.get<std::string>("prompt_files");
 
     b_continue = cmd.get<bool>("continue");
+
+    AX_ENGINE_NPU_ATTR_T npu_attr;
+    memset(&npu_attr, 0, sizeof(npu_attr));
+    npu_attr.eHardMode = AX_ENGINE_VIRTUAL_NPU_DISABLE;
+    AX_SYS_Init();
+    auto ret = AX_ENGINE_Init(&npu_attr);
+    if (0 != ret)
+    {
+        return ret;
+    }
 
     if (!lLaMa.Init(attr))
     {

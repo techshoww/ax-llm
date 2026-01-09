@@ -5,21 +5,21 @@ import torchaudio
 import numpy as np
 from frontend import CosyVoiceFrontEnd
 
-def load_wav(wav, target_sr):
+def load_wav(wav, target_sr, min_sr=16000):
     speech, sample_rate = torchaudio.load(wav, backend='soundfile')
     speech = speech.mean(dim=0, keepdim=True)
     if sample_rate != target_sr:
-        assert sample_rate > target_sr, 'wav sample rate {} must be greater than {}'.format(sample_rate, target_sr)
+        assert sample_rate >= min_sr, 'wav sample rate {} must be greater than {}'.format(sample_rate, target_sr)
         speech = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)(speech)
     return speech
 
 if __name__ == "__main__":
 
     args = argparse.ArgumentParser()
-    args.add_argument('--model_dir', type=str, default="scripts/CosyVoice-BlankEN", help="tokenizer configuration directionary")
-    args.add_argument('--wetext_dir', type=str, default="pengzhendong/wetext", help="path to wetext")
+    args.add_argument('--model_dir', type=str, default="../Fun-CosyVoice3-0.5B-2512/CosyVoice-BlankEN/", help="tokenizer configuration directionary")
+    args.add_argument('--wetext_dir', type=str, default="../CosyVoice/pengzhendong/wetext", help="path to wetext")
     args.add_argument('--sample_rate', type=int, default=24000, help="Sampling rate for prompt audio")
-    args.add_argument('--prompt_text', type=str, default="希望你以后能够做的比我还好呦。", help="The text content of the prompt(reference) audio. Text or file path.")
+    args.add_argument('--prompt_text', type=str, default="You are a helpful assistant.<|endofprompt|>希望你以后能够做的比我还好呦。", help="The text content of the prompt(reference) audio. Text or file path.")
     args.add_argument('--prompt_speech', type=str, default="asset/zero_shot_prompt.wav", help="The path to prompt(reference) audio.")
     args.add_argument('--output', type=str, default="prompt_files", help="Output data storage directory")
     args = args.parse_args()
@@ -28,8 +28,8 @@ if __name__ == "__main__":
 
     frontend = CosyVoiceFrontEnd(f"{args.model_dir}",
                                 args.wetext_dir,
-                                "frontend-onnx/campplus.onnx",
-                                "frontend-onnx/speech_tokenizer_v2.onnx",
+                                "../CosyVoice/frontend-onnx/campplus.onnx",
+                                "../CosyVoice/frontend-onnx/speech_tokenizer_v3.onnx",
                                 f"{args.model_dir}/spk2info.pt",
                                 "all")
 

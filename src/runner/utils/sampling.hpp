@@ -140,7 +140,7 @@ namespace sampling {
     int ras_sampling(const std::vector<float>& weighted_scores,
                     const std::vector<int>& decoded_tokens,
                     int speech_token_size, // Assuming this is passed or part of context
-                    float top_p = 0.8f, int top_k = 25,
+                    float top_p = 0.6f, int top_k = 25,
                     int win_size = 10, float tau_r = 0.1f) {
 
         // 1. Perform Nucleus Sampling
@@ -180,7 +180,7 @@ namespace sampling {
             top_id = ras_sampling(weighted_scores, decoded_tokens, speech_token_size);
 
             // Check EOS condition
-            if (!ignore_eos || (speech_token_size < 0 || top_id != speech_token_size)) {
+            if (!ignore_eos || (speech_token_size < 0 || top_id < speech_token_size)) {
                 break; // Accept the sample if EOS is not ignored, or if it's not the EOS token
             }
 

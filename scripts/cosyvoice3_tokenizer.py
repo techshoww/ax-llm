@@ -8,7 +8,7 @@ class Tokenizer_Http():
 
     def __init__(self):
         
-        self.tokenizer = get_qwen_tokenizer("../../model_convert/pretrained_models/CosyVoice2-0.5B/CosyVoice-BlankEN/", True)
+        self.tokenizer = get_qwen_tokenizer("../Fun-CosyVoice3-0.5B-2512/CosyVoice-BlankEN/", True, "cosyvoice3")
 
     def encode(self, prompt):
     

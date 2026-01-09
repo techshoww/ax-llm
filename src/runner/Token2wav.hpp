@@ -20,15 +20,12 @@
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
-#include "MNN/MNNDefine.h"
-#include "MNN/MNNForwardType.h"
-#include "MNN/Interpreter.hpp"
 
 class Token2Wav
 {
 public:
     int flow_embed_num = 6561;
-    int flow_embed_size = 512;
+    int flow_embed_size = 80;
     int token_mel_ratio = 2;
     int token_hop_len = 25;
     int max_infer_chunk_num = 3;
@@ -47,14 +44,14 @@ private:
     ax_runner_ax650 flow_estimator_250;
     ax_runner_ax650 flow_estimator_300;
 
-    ax_runner_ax650 hift_p2_50_first;
-    ax_runner_ax650 hift_p2_58;
-
-    std::shared_ptr<MNN::Interpreter> hift_p1_50_first = nullptr;
-    std::shared_ptr<MNN::Interpreter> hift_p1_58 = nullptr;
-
-    MNN::Session * sess_hift_p1_50_first = nullptr;
-    MNN::Session * sess_hift_p1_58 = nullptr;
+    ax_runner_ax650 hift_p1_50;
+    ax_runner_ax650 hift_p2_50;
+    ax_runner_ax650 hift_p1_100;
+    ax_runner_ax650 hift_p2_100;
+    ax_runner_ax650 hift_p1_150;
+    ax_runner_ax650 hift_p2_150;
+    ax_runner_ax650 hift_p1_final_100;
+    ax_runner_ax650 hift_p2_final_100;
 
 
     std::vector<float> rand_noise;
@@ -62,7 +59,6 @@ private:
 
     LLaMaEmbedSelector flow_embed_selector;
     
-    std::unordered_map<std::string, std::vector<float>> hift_cache_dict;
     std::vector<float> speech_window; // np.hamming(2 * 8 * 480)
 
     int init_noise(std::string model_dir)
@@ -77,12 +73,6 @@ private:
 
     int init_tspan(int n_timesteps)
     {
-        // std::vector<float> t_span_10 = {0.0000, 0.0123, 0.0489, 0.1090, 0.1910, 0.2929, 0.4122, 0.5460, 0.6910,0.8436, 1.0000};
-        // std::vector<float> t_span_7 = {0.0000, 0.1429, 0.2857, 0.4286, 0.5714, 0.7143, 0.8571, 1.0000}; // n_timesteps = 7
-        // std::vector<float> t_span_6 = {0.0000, 0.1667, 0.3333, 0.5000, 0.6667, 0.8333, 1.0000};       // n_timesteps = 6
-        // std::vector<float> t_span_5 = {0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000 };
-        // std::vector<float> t_span_4 = {0.0000, 0.2500, 0.5000, 0.7500, 1.0000};
-
         if(n_timesteps <4)
         {
             return -1;
@@ -90,6 +80,10 @@ private:
 
         n_timesteps = n_timesteps;
         t_span = linspace(0.0, 1.0, n_timesteps + 1);
+        std::transform(t_span.begin(), t_span.end(), t_span.begin(),
+            [](float t) { 
+                return 1.0 - std::cos(t * 0.5 * M_PI); 
+            });
         return 0;
     }
 
@@ -171,43 +165,61 @@ public:
             return false;
         }
 
-        ret = hift_p2_50_first.init((model_dir+"/hift_p2_50_first.axmodel").c_str(), false);
+        ret = hift_p1_50.init((model_dir+"/hift_p1_50.axmodel").c_str(), false);
         if (ret != 0)
         {
-            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_50_first.axmodel").c_str());
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p1_50.axmodel").c_str());
             return false;
         }
 
-        ret = hift_p2_58.init((model_dir+"/hift_p2_58.axmodel").c_str(), false);
+        ret = hift_p2_50.init((model_dir+"/hift_p2_50.axmodel").c_str(), false);
         if (ret != 0)
         {
-            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_58.axmodel").c_str());
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_50.axmodel").c_str());
             return false;
         }
 
-        MNN::ScheduleConfig config;
-        config.numThread = 2;
-        config.type      = static_cast<MNNForwardType>(MNN_FORWARD_CPU);
-        MNN::BackendConfig backendConfig;
-        backendConfig.precision = (MNN::BackendConfig::PrecisionMode)1;
-        config.backendConfig = &backendConfig;
-
-        hift_p1_50_first = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile( (model_dir+"/hift_p1_50_first.mnn").c_str() ));
-        if(nullptr == hift_p1_50_first)
+        ret = hift_p1_100.init((model_dir+"/hift_p1_100.axmodel").c_str(), false);
+        if (ret != 0)
         {
-            ALOGE("init mnn model(%s) failed", (model_dir+"/hift_p1_50_first.mnn").c_str());
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p1_100.axmodel").c_str());
             return false;
         }
-        sess_hift_p1_50_first = hift_p1_50_first->createSession(config);
 
-        hift_p1_58 = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile( (model_dir+"/hift_p1_58.mnn").c_str() ));
-        if(nullptr == hift_p1_58)
+        ret = hift_p2_100.init((model_dir+"/hift_p2_100.axmodel").c_str(), false);
+        if (ret != 0)
         {
-            ALOGE("init mnn model(%s) failed", (model_dir+"/hift_p1_58.mnn").c_str() );
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_100.axmodel").c_str());
             return false;
         }
 
-        sess_hift_p1_58 = hift_p1_58->createSession(config);
+        ret = hift_p1_150.init((model_dir+"/hift_p1_150.axmodel").c_str(), false);
+        if (ret != 0)
+        {
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p1_150.axmodel").c_str());
+            return false;
+        }
+
+        ret = hift_p2_150.init((model_dir+"/hift_p2_150.axmodel").c_str(), false);
+        if (ret != 0)
+        {
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_150.axmodel").c_str());
+            return false;
+        }
+
+        ret = hift_p1_final_100.init((model_dir+"/hift_p1_100_final.axmodel").c_str(), false);
+        if (ret != 0)
+        {
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p1_100_final.axmodel").c_str());
+            return false;
+        }
+
+        ret = hift_p2_final_100.init((model_dir+"/hift_p2_100_final.axmodel").c_str(), false);
+        if (ret != 0)
+        {
+            ALOGE("init axmodel(%s) failed", (model_dir+"/hift_p2_100_final.axmodel").c_str());
+            return false;
+        }
 
         ALOGI("Token2Wav init ok");
         return true;
@@ -222,8 +234,14 @@ public:
         flow_estimator_200.deinit();
         flow_estimator_250.deinit();
         flow_estimator_300.deinit();
-        hift_p2_50_first.deinit();
-        hift_p2_58.deinit();
+        hift_p1_50.deinit();
+        hift_p2_50.deinit();
+        hift_p1_100.deinit();
+        hift_p2_100.deinit();
+        hift_p1_150.deinit();
+        hift_p2_150.deinit();
+        hift_p1_final_100.deinit();
+        hift_p2_final_100.deinit();
         flow_embed_selector.Deinit();
     }
 
@@ -354,58 +372,45 @@ public:
         return 0;
     }
 
-    int infer_hift(std::vector<float> &mel, std::vector<float> &cache_source, 
-                    std::vector<float> & tts_speech, std::vector<float> & tts_source)
+    int infer_hift(std::vector<float> &mel, bool finalize,
+                    std::vector<float> & tts_speech)
     {
-        std::shared_ptr<MNN::Interpreter> model_p1;
-        MNN::Session * sess_p1;
+        ax_runner_ax650 * model_p1;
         ax_runner_ax650 * model_p2;
         int len = mel.size()/(80);
-        
-        if(len == 50 && cache_source.empty())
-        { 
-            model_p1 = hift_p1_50_first;
-            sess_p1 = sess_hift_p1_50_first;
-            model_p2 = &hift_p2_50_first;
-        }else if(len == 58 && !cache_source.empty())
+
+        if(finalize && len==100)
         {
-            model_p1 = hift_p1_58;
-            sess_p1 = sess_hift_p1_58;
-            model_p2 = &hift_p2_58;
+            model_p1 = &hift_p1_final_100;
+            model_p2 = &hift_p2_final_100;
+        }else if(len==50)
+        {
+            model_p1 = &hift_p1_50;
+            model_p2 = &hift_p2_50;
+        }else if(len==100)
+        {
+            model_p1 = &hift_p1_100;
+            model_p2 = &hift_p2_100;
+        }else if(len==150)
+        {
+            model_p1 = &hift_p1_150;
+            model_p2 = &hift_p2_150;
         }else
         {
-            ALOGE("invalid size: %d", len);
+            ALOGE("Unsupported mel length %d", len);
             return -1;
         }
 
-        std::vector<int> dims{1, 80, len};
-        auto tensor = MNN::Tensor::create<float>(dims, NULL, MNN::Tensor::CAFFE);
-        auto p_tensor   = tensor->host<float>();
-        auto size   = tensor->size();
-        std::memcpy(p_tensor, mel.data(), size);
+        void * p = model_p1->get_input("mel").pVirAddr;
+        memcpy(p, mel.data(), mel.size() * sizeof(float));
+        model_p1->inference();
+        auto &s = model_p1->get_output("s");
         
-        auto inputTensor = model_p1->getSessionInput(sess_p1, nullptr);
-        inputTensor->copyFromHostTensor(tensor);
-        
-        model_p1->runSession(sess_p1);
-        
-        MNN::Tensor *p_out  = model_p1->getSessionOutput(sess_p1, "s");
-        MNN::Tensor out_host(p_out, p_out->getDimensionType());
-        p_out->copyToHostTensor(&out_host);
-        
-        auto p_s = out_host.host<float>();
-
-        void * p = model_p2->get_input("s").pVirAddr;
-        memcpy(p, p_s, len * 480 * sizeof(float));
+        p = model_p2->get_input("s").pVirAddr;
+        memcpy(p, s.pVirAddr, s.nSize);
         
         p = model_p2->get_input("mel").pVirAddr;
         memcpy(p, mel.data(), mel.size() * sizeof(float));
-        
-        if(!cache_source.empty())
-        {
-            p = model_p2->get_input("hift_cache_source").pVirAddr;
-            memcpy(p, cache_source.data(), cache_source.size() * sizeof(float));
-        }
         
         model_p2->inference();
         
@@ -416,13 +421,6 @@ public:
         }
         memcpy(tts_speech.data(), output_speech.pVirAddr, output_speech.nSize);
 
-        auto &output_source = model_p2->get_output(1);
-        if(tts_source.empty() || tts_source.size() != output_source.nSize / sizeof(float))
-        {
-            tts_source.resize(output_source.nSize / sizeof(float));
-        }
-        memcpy(tts_source.data(), output_source.pVirAddr, output_source.nSize);
-        
         return 0;
     }
 
@@ -539,56 +537,8 @@ public:
         return result;
     }
 
-    void fade_in_out(std::vector<float>& fade_in_mel_data,
-                 const std::vector<float>& fade_out_mel_data,
-                 const std::vector<float>& window) {
-
-        // --- Constants based on window = np.hamming(2 * 8 * 480) ---
-        const size_t WINDOW_SIZE = 2 * 8 * 480; // 7680
-        const size_t MEL_OVERLAP_LEN = WINDOW_SIZE / 2; // 3840
-        // dim0 is implicitly 1 for both inputs
-        size_t dim1_in = fade_in_mel_data.size();
-        size_t dim1_out = fade_out_mel_data.size();
-        // --- Input Validation ---
-        // For 2D arrays [1, L], the 1D vector size is just L.
-        
-        if (window.size() != WINDOW_SIZE) {
-            throw std::invalid_argument("window size (" + std::to_string(window.size()) +
-                                        ") does not match expected size (7680).");
-        }
-        // Check if input arrays have enough elements for the overlap
-        if (dim1_in < MEL_OVERLAP_LEN) {
-            throw std::invalid_argument("fade_in_mel_data's column count (" + std::to_string(dim1_in) +
-                                        ") is smaller than mel_overlap_len (" + std::to_string(MEL_OVERLAP_LEN) + ").");
-        }
-        if (dim1_out < MEL_OVERLAP_LEN) {
-            throw std::invalid_argument("fade_out_mel_data's column count (" + std::to_string(dim1_out) +
-                                        ") is smaller than mel_overlap_len (" + std::to_string(MEL_OVERLAP_LEN) + ").");
-        }
-
-        // --- Perform Fade In/Out ---
-        // Since dim0=1, we only have one "row" to process.
-        // Iterate through the overlapping elements in the column dimension.
-        for (size_t i = 0; i < MEL_OVERLAP_LEN; ++i) {
-            // Indices are simply 'i' for the start of fade_in_mel
-            // and 'dim1_out - MEL_OVERLAP_LEN + i' for the end of fade_out_mel
-            const size_t in_idx = i;
-            const size_t out_idx = dim1_out - MEL_OVERLAP_LEN + i;
-
-            // Perform the weighted sum: result = in_val * win_in + out_val * win_out
-            // in_val = fade_in_mel_data[in_idx]
-            // out_val = fade_out_mel_data[out_idx]
-            // win_in = window[i]
-            // win_out = window[MEL_OVERLAP_LEN + i]
-            fade_in_mel_data[in_idx] = fade_in_mel_data[in_idx] * window[i] +
-                                    fade_out_mel_data[out_idx] * window[MEL_OVERLAP_LEN + i];
-        }
-        // fade_in_mel_data is now modified in-place with the faded result.
-    }
-
     void reset()
     {
-        std::unordered_map<std::string, std::vector<float>>().swap(hift_cache_dict);
     }
 
     std::vector<float> infer(std::vector<int> & text_speech_token, std::vector<float> & prompt_speech_embeds, std::vector<float> & prompt_feat,  
@@ -612,89 +562,24 @@ public:
         }
 
         std::vector<float> mel;
-    
         mel = infer_flow(speech_embeds, prompt_feat, spk_embeds, text_speech_token.size(), finalize);   
-
-        std::vector<float> tts_mel;
-        int neg_offset=0, start;
-        if(finalize)
-        {
-            neg_offset = token_offset * token_mel_ratio - mel.size()/80;
-            start = - token_hop_len * token_mel_ratio;
-        }
-        else{
-            start = std::min( int(token_offset / token_hop_len), max_infer_chunk_num-1) * token_hop_len * token_mel_ratio;
-        }
-        
-        tts_mel = slice_3d_last_dim_from<float>(mel, 1, 80, mel.size()/80, start);
-        
-        std::vector<float> hift_cache_source;
-        std::vector<float> tts_mel1;
-        std::vector<float> speech, source, tts_speech;
-        if (!hift_cache_dict.empty())
-        {
-            auto hift_cache_mel = hift_cache_dict["mel"];
-            hift_cache_source = hift_cache_dict["source"];
-            tts_mel1 = concat_3d_dim2<float>(hift_cache_mel, 1, 80, hift_cache_mel.size()/80, tts_mel, 1, 80, tts_mel.size()/80);
-        }
-        else{
-            tts_mel1 = tts_mel;
-        }   
-        ret = infer_hift(tts_mel1, hift_cache_source, speech, source);
+       
+        std::vector<float> speech, tts_speech;
+        ret = infer_hift(mel, finalize, speech);
         
         if(ret != 0){
             ALOGE("failed");
             return std::vector<float>{};
         }
-
+        
+        int neg_offset;
         if(!finalize)
         {
-            
-            if(!hift_cache_dict.empty())
-            {
-                fade_in_out(speech, hift_cache_dict["speech"], speech_window);
-            }
-
-            hift_cache_dict["mel"] = slice_3d_last_dim_from<float>(tts_mel1, 1, 80, tts_mel1.size()/80, -mel_cache_len);
-
-            int offset = speech.size();
-            if(speech.size() > source_cache_len)
-            {
-                offset = source_cache_len;
-            }
-
-            hift_cache_dict["source"].assign(source.end()-offset, source.end());
-            hift_cache_dict["speech"].assign(speech.end()-offset, speech.end());
-            tts_speech.assign(speech.begin(), speech.end()-offset);
-
+            neg_offset = (speech.size()/480 > 50)? -50: -(speech.size()/480);
+        }else{
+            neg_offset = token_offset * token_mel_ratio - mel.size()/80;
         }
-        else{
-
-            if(speech.size() < source_cache_len){
-                tts_speech.assign(speech.begin(), speech.end());
-            }
-            else if (- neg_offset*480 >= source_cache_len)
-            {
-                tts_speech.assign(speech.end() + neg_offset*480, speech.end());
-
-                if(!hift_cache_dict.empty())
-                {
-                    fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
-                }
-            }
-            else{
-                tts_speech.assign(speech.end()-source_cache_len, speech.end());
-
-                if(!hift_cache_dict.empty())
-                {
-                    fade_in_out(tts_speech, hift_cache_dict["speech"], speech_window);
-                }
-
-                int offset = speech.size() + neg_offset*480 - (speech.size() - source_cache_len);
-                tts_speech.assign(tts_speech.begin() + offset, tts_speech.end());
-            }
-            
-        }
+        tts_speech.assign(speech.end() + neg_offset * 480, speech.end());
 
         return tts_speech;
     }

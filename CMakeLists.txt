@@ -18,17 +18,6 @@ add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# mnn
-option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) # 明确写出帮助字符串是好习惯
-option(MNN_KLEIDIAI "Enable Kleidiai backend for MNN" OFF)
-option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
-
-set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/MNN)
-add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/MNN)
-
-
-include_directories(third_party/MNN/include/)
-
 # bsp
 if(NOT BSP_MSP_DIR)
     # 判断 /soc/lib/libax_engine.so 是否存在，以确定是否为板端编译
@@ -76,13 +65,12 @@ function(build_exec name main_source)
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys tokenizer)
     target_link_libraries(${name} ${OpenCV_LIBS})
-    target_link_libraries(${name} MNN)
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
 build_exec(main src/main.cpp)
 build_exec(main_api src/main_api.cpp)
 
-file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh")
+file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh" "${CMAKE_SOURCE_DIR}/scripts/*tokenizer.txt")
 install(FILES ${RUN_SCRIPT} DESTINATION bin/)
 

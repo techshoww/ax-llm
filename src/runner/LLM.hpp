@@ -11,8 +11,8 @@
 #include <cmath>
 #include <numeric>
 #include "bfloat16.hpp"
-// #include "Tokenizer/Tokenizer.hpp"
-#include "BaseTokenizer.hpp"
+#include "Tokenizer/Tokenizer.hpp"
+// #include "BaseTokenizer.hpp"
 #include "LLMEmbedSelector.hpp"
 #include "ax_model_runner/ax_model_runner_ax650.hpp"
 #include "ax_cmm_utils.hpp"
@@ -43,7 +43,7 @@ struct LLMAttrType
     int precompute_len = 0;
     int prefill_grpid = -1;
 
-    // TokenizerType tokenizer_type = TKT_HTTP;
+    TokenizerType tokenizer_type = TKT_HTTP;
     std::string filename_tokenizer_model = "http://127.0.0.1:12345";
     bool b_bos = false, b_eos = false;
     std::string filename_tokens_embed = "tinyllama.model.embed_tokens.weight.bfloat16.bin";
@@ -52,10 +52,13 @@ struct LLMAttrType
     int tokens_embed_num = 151936;
     int tokens_embed_size = 896;
 
-    int llm_embed_num = 2;
+    int speech_token_size = 6561;
+    int llm_embed_num = speech_token_size + 200;
     int llm_embed_size = 896;
-    int speech_embed_num = 6564;
+    int speech_embed_num = speech_token_size + 200;
     int speech_embed_size = 896;
+    int sos = speech_token_size + 0;
+    int task_id = speech_token_size + 2;
 
     int max_token_len = 127; // auto calc
 
@@ -108,13 +111,19 @@ public:
         ALOGI("LLM init start");
         t_cqdm cqdm = create_cqdm(attr.axmodel_num + 3, 32);
         this->_attr = attr;
-        tokenizer = create_tokenizer(Qwen3);
-        if (!tokenizer->load(attr.filename_tokenizer_model))
+        // tokenizer = create_tokenizer(Qwen2_5);
+        // if (!tokenizer->load(attr.filename_tokenizer_model))
+        // {
+        //     ALOGE("tokenizer.load(%s) failed", attr.filename_tokenizer_model.c_str());
+        //     return false;
+        // }
+        // tokenizer->set_think_in_prompt(true);
+        tokenizer = CreateTokenizer(attr.tokenizer_type);
+        if (!tokenizer->Init(attr.filename_tokenizer_model, attr.b_bos, attr.b_eos))
         {
-            ALOGE("tokenizer.load(%s) failed", attr.filename_tokenizer_model.c_str());
+            ALOGE("tokenizer.Init(%s, %d, %d) failed", attr.filename_tokenizer_model.c_str(), attr.b_bos, attr.b_eos);
             return false;
         }
-        tokenizer->set_think_in_prompt(true);
         update_cqdm(&cqdm, 0, "count", "tokenizer init ok");
 
         if (!embed_selector.Init(attr.filename_tokens_embed, attr.tokens_embed_num, attr.tokens_embed_size, attr.b_use_mmap_load_embed))
@@ -304,7 +313,10 @@ public:
 
     int Encode(std::vector<unsigned short> &out_embed, std::vector<std::vector<int>> &position_ids, std::string text, std::vector<unsigned short> &prompt_text_embeds, std::vector<unsigned short> &prompt_speech_embeds)
     {
-        std::vector<int> text_ids = tokenizer->encode(text);
+        // std::vector<int> text_ids = tokenizer->encode(text);
+        ImageInfo img_info;
+        img_info.img_prompt = false;
+        std::vector<int> text_ids = tokenizer->Encode(text, img_info);
         int prompt_ids_size = prompt_text_embeds.size() / _attr.tokens_embed_size;
         int total_size = prompt_ids_size + text_ids.size() + 2 + prompt_speech_embeds.size() / _attr.speech_embed_size;
         if (total_size > _attr.prefill_max_token_num)
@@ -314,7 +326,7 @@ public:
         }
         out_embed.resize(total_size * _attr.tokens_embed_size);
 
-        llm_embed_selector.getByIndex(0, out_embed.data() + 0 * _attr.tokens_embed_size);
+        llm_embed_selector.getByIndex(_attr.sos, out_embed.data() + 0 * _attr.tokens_embed_size);
 
         // for (size_t i = 0; i < prompt_ids_size; i++)
         // {
@@ -327,7 +339,7 @@ public:
             embed_selector.getByIndex(text_ids[i], out_embed.data() + (1 + prompt_ids_size + i) * _attr.tokens_embed_size);
         }
 
-        llm_embed_selector.getByIndex(1, out_embed.data() + (1 + prompt_ids_size + text_ids.size()) * _attr.tokens_embed_size);
+        llm_embed_selector.getByIndex(_attr.task_id, out_embed.data() + (1 + prompt_ids_size + text_ids.size()) * _attr.tokens_embed_size);
 
         // for (size_t i = 0; i < prompt_speech_tokens.size(); i++)
         // {
@@ -356,7 +368,23 @@ public:
     {
         std::vector<unsigned short> text_embed;
         std::vector<std::vector<int>> position_ids;
+
+        // std::vector<float> prompt_speech_embeds_fp32(prompt_speech_embeds.size());
+        // for (int i = 0; i < prompt_speech_embeds.size(); i++)
+        // {
+        //     unsigned int proc = prompt_speech_embeds[i] << 16;
+        //     prompt_speech_embeds_fp32[i] = *reinterpret_cast<float *>(&proc);
+        // }
+        // savetxt("prompt_speech_embeds.txt", prompt_speech_embeds_fp32, '\n');
+
         Encode(text_embed, position_ids, input_str, prompt_text_embeds, prompt_speech_embeds);
+        // std::vector<float> text_embed_fp32(text_embed.size());
+        // for (int i = 0; i < text_embed.size(); i++)
+        // {
+        //     unsigned int proc = text_embed[i] << 16;
+        //     text_embed_fp32[i] = *reinterpret_cast<float *>(&proc);
+        // }
+        // savetxt("lminput.txt", text_embed_fp32, '\n');
         return Run(text_embed, position_ids, token_buffer, buffer_mutex, buffer_cv, llm_finished);
     }
 
@@ -580,11 +608,11 @@ public:
                 float *post_decoder = (float *)output_decoder.pVirAddr;
 
                 memcpy(scores.data(), post_decoder, output_decoder.nSize);
-                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_embed_num - 3, true);
+                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_token_size, true);
             }
             next_token = max_index;
 
-            if (max_index >= _attr.speech_embed_num - 3)
+            if (max_index >= _attr.speech_token_size)
             {
                 llm_finished = true;
                 buffer_cv.notify_all();
@@ -708,10 +736,9 @@ public:
                     ignore_eos = true;
                 }
 
-                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_embed_num - 3, ignore_eos);
+                max_index = sampling::sampling_ids(scores, cached_token, _attr.speech_token_size, ignore_eos);
                 next_token = max_index;
-
-                if (max_index == _attr.speech_embed_num - 3)
+                if (max_index >= _attr.speech_token_size)
                 {
                     b_hit_eos = true;
                     llm_finished = true;
@@ -720,7 +747,7 @@ public:
                     break;
                 }
 
-                if (max_index < _attr.speech_embed_num - 3)
+                if (max_index < _attr.speech_token_size)
                 {
                     token_ids.push_back(max_index);
                     cached_token.push_back(max_index);
