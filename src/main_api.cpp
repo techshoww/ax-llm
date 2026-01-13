@@ -339,7 +339,7 @@ int main(int argc, char *argv[])
         axclFinalize();
         return -1;
     }
-    ALOGI();
+    
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
