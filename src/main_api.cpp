@@ -7,7 +7,6 @@
 #include <atomic>
 #include <chrono> // For simulation delays
 #include <random> // For simulation data
-#include <opencv2/opencv.hpp>
 #include "signal.h"
 #include "runner/LLM.hpp"
 #include "runner/Token2wav.hpp"
@@ -19,6 +18,7 @@
 
 #include "runner/utils/httplib.h"
 #include "runner/utils/json.hpp"
+#include <axcl.h>
 
 static httplib::Server svr;
 static LLM lLaMa;
@@ -44,7 +44,7 @@ void __sigExit(int iSigNo)
 void simulate_llm()
 {
     std::vector<int> tokens;
-    readtxt("../../model_convert/llm_out_tokens.txt", tokens);
+    readtxt("../CosyVoice/llm_token_ids.txt", tokens);
 
     std::cout << "[LLM Thread] Starting to generate tokens...\n";
 
@@ -71,7 +71,7 @@ void simulate_llm()
         } // Lock is automatically released here
 
         // Notify the consumer (token2wav) that new data might be available
-        g_buffer_cv.notify_one();
+        // g_buffer_cv.notify_one();
     }
 
     // Signal that LLM generation is finished
@@ -79,7 +79,7 @@ void simulate_llm()
     std::cout << "[LLM Thread] Finished generating tokens.\n";
 
     // Final notify to wake up the consumer if it's waiting
-    g_buffer_cv.notify_all();
+    // g_buffer_cv.notify_all();
 }
 
 void reset()
@@ -128,7 +128,7 @@ int tts(
         int prompt_token_align_len = 75; // only support 75 now
 
         std::vector<float> prompt_speech_embeds_flow1;
-        prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin() + prompt_token_align_len * 512);
+        prompt_speech_embeds_flow1.insert(prompt_speech_embeds_flow1.begin(), prompt_speech_embeds_flow.begin(), prompt_speech_embeds_flow.begin() + prompt_token_align_len * lToken2Wav.flow_embed_size);
 
         std::vector<float> prompt_feat1;
         prompt_feat1.insert(prompt_feat1.begin(), prompt_feat.begin(), prompt_feat.begin() + prompt_token_align_len * 2 * 80);
@@ -184,10 +184,8 @@ int tts(
 
                 // TODO: 另起一个线程处理生成的音频
                 output.insert(output.end(), speech.begin(), speech.end());
-                std::string path = "output_" + std::to_string(i) + ".wav";
-
-                saveVectorAsWavFloat(speech, path, 24000, 1);
-
+                // std::string path = "output_" + std::to_string(i) + ".wav";
+                // saveVectorAsWavFloat(speech, path, 24000, 1);
                 i += 1;
             }
 
@@ -226,8 +224,8 @@ int tts(
         auto speech = lToken2Wav.infer(token, prompt_speech_embeds_flow1, prompt_feat1, spk_embeds, token_offset - start, true);
         // TODO: 另起一个线程处理生成的音频
         output.insert(output.end(), speech.begin(), speech.end());
-        std::string path = "output_" + std::to_string(i) + ".wav";
-        saveVectorAsWavFloat(speech, path, 24000, 1);
+        // std::string path = "output_" + std::to_string(i) + ".wav";
+        // saveVectorAsWavFloat(speech, path, 24000, 1);
         saveVectorAsWavFloat(output, "output.wav", 24000, 1);
 
         {
@@ -273,6 +271,7 @@ int main(int argc, char *argv[])
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
     cmd.add<int>("n_timesteps", 0, "num of time steps", false, 7);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
+    cmd.add<std::string>("devices", 0, "devices id,for example: \"0,1,2,3\" ", true, "0,1,2,3");
 
     cmd.parse_check(argc, argv);
 
@@ -294,14 +293,50 @@ int main(int argc, char *argv[])
     std::string prompt_files = cmd.get<std::string>("prompt_files");
 
     b_continue = cmd.get<bool>("continue");
+    auto devices_str = cmd.get<std::string>("devices");
+    std::vector<int> devices;
+    std::stringstream ss(devices_str);
+    std::string item;
+    while (std::getline(ss, item, ','))
+    {
+        devices.push_back(std::stoi(item));
+        ALOGI("device: %d", std::stoi(item));
+    }
+
+    // 分别给 Token2Wav和LLM分配devices
+    lToken2Wav.devid = devices[ devices.size()-1 ];
+    if(devices.size()>1)
+    {
+        attr.dev_ids.assign(devices.begin(), devices.end()-1);
+    }else{
+        attr.dev_ids.assign(devices.begin(), devices.end());
+    }
+    
+    auto ret = axclInit(nullptr);
+    if (0 != ret)
+    {
+        return ret;
+    }
+    
+    for (auto &devid : devices)
+    {
+        if (axcl_Init(devid) != 0)
+        {
+            ALOGE("axcl_Init(%d) failed", devid);
+            return -1;
+        }
+    }
 
     if (!lLaMa.Init(attr))
     {
+        axclFinalize();
         return -1;
     }
 
     if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
+        lLaMa.Deinit();
+        axclFinalize();
         return -1;
     }
     ALOGI();
@@ -471,6 +506,8 @@ int main(int argc, char *argv[])
 
     lLaMa.Deinit();
     lToken2Wav.Deinit();
-
+    for (auto &devid : devices)
+        axcl_Exit(devid);
+    axclFinalize();
     return 0;
 }

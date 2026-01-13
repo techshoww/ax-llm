@@ -16,6 +16,7 @@ TOKEN2WAV_DIR=../CosyVoice/token2wav-axmodels/
 --filename_speech_embed "${LLM_DIR}/llm.speech_embedding.float16.bin" \
 --continue 0 \
 --prompt_files prompt_files \
+--devices "0,1,2" \
 --text "高管也通过电话、短信、微信等方式对报道[j][ǐ]予好评。"
 
 

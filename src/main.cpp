@@ -7,7 +7,6 @@
 #include <atomic>
 #include <chrono> // For simulation delays
 #include <random> // For simulation data
-#include <opencv2/opencv.hpp>
 #include "signal.h"
 #include "runner/LLM.hpp"
 #include "runner/Token2wav.hpp"
@@ -16,8 +15,7 @@
 #include "runner/utils/timer.hpp"
 #include "cmdline.hpp"
 #include "runner/utils/files.hpp"
-#include <ax_sys_api.h>
-#include <ax_engine_api.h>
+#include <axcl.h>
 
 static LLM lLaMa;
 static Token2Wav lToken2Wav;
@@ -261,7 +259,7 @@ int main(int argc, char *argv[])
     cmd.add<int>("axmodel_num", 0, "num of axmodel(for template)", false, attr.axmodel_num);
     cmd.add<int>("n_timesteps", 'ts', "num of time steps", false, 7);
     cmd.add<bool>("continue", 0, "continuous dialogue", false, b_continue);
-
+    cmd.add<std::string>("devices", 0, "devices id,for example: \"0,1,2,3\" ", true, "0,1,2,3");
     cmd.parse_check(argc, argv);
 
     text = cmd.get<std::string>("text");
@@ -283,26 +281,53 @@ int main(int argc, char *argv[])
 
     b_continue = cmd.get<bool>("continue");
 
-    AX_ENGINE_NPU_ATTR_T npu_attr;
-    memset(&npu_attr, 0, sizeof(npu_attr));
-    npu_attr.eHardMode = AX_ENGINE_VIRTUAL_NPU_DISABLE;
-    AX_SYS_Init();
-    auto ret = AX_ENGINE_Init(&npu_attr);
+    auto devices_str = cmd.get<std::string>("devices");
+    std::vector<int> devices;
+    std::stringstream ss(devices_str);
+    std::string item;
+    while (std::getline(ss, item, ','))
+    {
+        devices.push_back(std::stoi(item));
+        ALOGI("device: %d", std::stoi(item));
+    }
+
+    // 分别给 Token2Wav和LLM分配devices
+    lToken2Wav.devid = devices[ devices.size()-1 ];
+    if(devices.size()>1)
+    {
+        attr.dev_ids.assign(devices.begin(), devices.end()-1);
+    }else{
+        attr.dev_ids.assign(devices.begin(), devices.end());
+    }
+
+    auto ret = axclInit(nullptr);
     if (0 != ret)
     {
         return ret;
     }
 
+    for (auto &devid : devices)
+    {
+        if (axcl_Init(devid) != 0)
+        {
+            ALOGE("axcl_Init(%d) failed", devid);
+            return -1;
+        }
+    }
+
     if (!lLaMa.Init(attr))
     {
+        axclFinalize();
         return -1;
     }
 
     if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
     {
+        lLaMa.Deinit();
+        axclFinalize();
         return -1;
     }
-    ALOGI();
+    
     // for llm
     std::vector<int> prompt_text_token;
     std::vector<unsigned short> prompt_text_embeds;
@@ -367,6 +392,8 @@ int main(int argc, char *argv[])
 
     lLaMa.Deinit();
     lToken2Wav.Deinit();
-
+    for (auto &devid : devices)
+        axcl_Exit(devid);
+    axclFinalize();
     return 0;
 }
