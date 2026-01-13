@@ -41,7 +41,7 @@ args = args.parse_args()
 frontend = CosyVoiceFrontEnd(f"{args.model_dir}",
                                 args.wetext_dir,
                                 "frontend-onnx/campplus.onnx",
-                                "frontend-onnx/speech_tokenizer_v2.onnx",
+                                "frontend-onnx/speech_tokenizer_v3.onnx",
                                 f"{args.model_dir}/spk2info.pt",
                                 "all")
 
@@ -60,7 +60,7 @@ def update_audio(audio_input_path, audio_text):
     os.makedirs(output_dir, exist_ok=True)
     zero_shot_spk_id = ""
     prompt_speech_16k = load_wav(audio_input_path, 16000)
-    prompt_text = audio_text
+    prompt_text = "You are a helpful assistant.<|endofprompt|>"+audio_text
     print("prompt_text",prompt_text)
     model_input = frontend.process_prompt( prompt_text, prompt_speech_16k, args.sample_rate, zero_shot_spk_id)
     print("prompt speech token size:", model_input["flow_prompt_speech_token"].shape)
@@ -123,20 +123,20 @@ def run_tts(text):
 
 
 with gr.Blocks() as demo:
-    gr.Markdown("### 🎙️ AXERA CosyVoice2 Demo")
+    gr.Markdown("### 🎙️ AXERA CosyVoice3 Demo")
     
     with gr.Row():
         with gr.Column():
             audio_input = gr.Audio(label="输入音频", type="filepath")
         with gr.Column():
-            audio_text = gr.Textbox(label="音频文本(自己改一下或者照着念)", value="锄禾日当午，汗滴禾下土。")
+            audio_text = gr.Textbox(label="音频文本(自己改一下或者照着念)", value="希望你以后能够做的比我还好呦。")
             btn_update = gr.Button("更新音源")
         
 
     with gr.Row():
-        text_input = gr.Textbox(value="琦琦，麻烦你适配一下这个新的模型吧。", label="输入文本")
+        text_input = gr.Textbox(value="高管也通过电话、短信、微信等方式对报道[j][ǐ]予好评。", label="输入文本")
         with gr.Column():
-            timesteps = gr.Slider(minimum=4, maximum=30, value=7, step=1, label="Timesteps")
+            timesteps = gr.Slider(minimum=4, maximum=30, value=10, step=1, label="Timesteps")
             run_btn = gr.Button("生成语音")
 
     status = gr.Label(label="状态")
