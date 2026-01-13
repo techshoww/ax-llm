@@ -292,7 +292,7 @@ int main(int argc, char *argv[])
     }
 
     // 分别给 Token2Wav和LLM分配devices
-    lToken2Wav.devid = devices[ devices.size()-1 ];
+    int t2v_devid = devices[ devices.size()-1 ];
     if(devices.size()>1)
     {
         attr.dev_ids.assign(devices.begin(), devices.end()-1);
@@ -321,7 +321,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps))
+    if (!lToken2Wav.Init(token2wav_axmodel_dir, n_timesteps, t2v_devid))
     {
         lLaMa.Deinit();
         axclFinalize();

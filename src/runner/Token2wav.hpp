@@ -24,7 +24,7 @@
 class Token2Wav
 {
 public:
-    int devid = 0;
+    int devid;
     int flow_embed_num = 6561;
     int flow_embed_size = 80;
     int token_mel_ratio = 2;
@@ -89,10 +89,10 @@ private:
     }
 
 public:
-    bool Init(std::string model_dir, int n_timesteps)
+    bool Init(std::string model_dir, int n_timesteps, int devid)
     {
         int ret;
-
+        devid = devid;
         ret = init_tspan(n_timesteps);
         if(ret != 0){
             ALOGE("init_tspan failed, n_timesteps:%d", n_timesteps);
