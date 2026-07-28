@@ -83,10 +83,10 @@ private:
         // std::vector<float> t_span_5 = {0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000 };
         // std::vector<float> t_span_4 = {0.0000, 0.2500, 0.5000, 0.7500, 1.0000};
 
-        if(n_timesteps <4)
-        {
-            return -1;
-        }
+        // if(n_timesteps <4)
+        // {
+        //     return -1;
+        // }
 
         n_timesteps = n_timesteps;
         t_span = linspace(0.0, 1.0, n_timesteps + 1);
