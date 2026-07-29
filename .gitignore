@@ -4,6 +4,8 @@ weights
 build*
 tools/test.cpp
 !build.sh
+!build_axcl_aarch64.sh
+!build_axcl_x86.sh
 qtproj/LLM-Chat/CMakeLists.txt.user
 *.txt
 __pycache__/

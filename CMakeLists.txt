@@ -72,10 +72,32 @@ include_directories(src)
 include_directories(src/runner)
 include_directories(src/runner/utils)
 
-include_directories(axcl/include)
-link_directories(axcl/lib)
-include_directories(/usr/include/axcl/)
-link_directories(/usr/lib/axcl/)
+# AXCL SDK.  AXCL_DIR can be supplied on the CMake command line (or through
+# the environment) by the AXCL build scripts.  Fall back to a system-wide
+# installation for backwards compatibility with the original build flow.
+if(NOT AXCL_DIR AND DEFINED ENV{AXCL_DIR})
+    set(AXCL_DIR "$ENV{AXCL_DIR}")
+endif()
+
+if(AXCL_DIR)
+    set(AXCL_INCLUDE_DIRS
+        "${AXCL_DIR}/include"
+        "${AXCL_DIR}/include/include"
+        "${AXCL_DIR}/include/axcl"
+        "${AXCL_DIR}/include/axcl/include")
+    set(AXCL_LIBRARY_DIRS
+        "${AXCL_DIR}/lib"
+        "${AXCL_DIR}/lib/axcl"
+        "${AXCL_DIR}/bin")
+    message(STATUS "AXCL_DIR = ${AXCL_DIR}")
+else()
+    set(AXCL_INCLUDE_DIRS /usr/include/axcl)
+    set(AXCL_LIBRARY_DIRS /usr/lib/axcl)
+    message(STATUS "AXCL_DIR is not set; using the system AXCL SDK")
+endif()
+
+include_directories(${AXCL_INCLUDE_DIRS})
+link_directories(${AXCL_LIBRARY_DIRS})
 
 
 function(build_exec name main_source)
@@ -95,6 +117,16 @@ function(build_exec name main_source)
     target_link_libraries(${name} spdlog axcl_pcie_dma axcl_pcie_msg axcl_token axcl_comm axcl_pkg axcl_rt pthread OpenMP::OpenMP_CXX)
     target_link_libraries(${name} ${OpenCV_LIBS})
     target_link_libraries(${name} onnxruntime)
+    # The prebuilt aarch64 ONNX Runtime is linked against a distro libstdc++
+    # with GLIBCXX symbol versions.  The Arm GNU 9.2 toolchain used by
+    # build_axcl_aarch64.sh ships an unversioned libstdc++, so its linker
+    # cannot resolve ONNX Runtime's versioned *shared-library* references.
+    # Keep those references for the target dynamic loader, which supplies the
+    # board's libstdc++.so.6, instead of trying to resolve them at link time.
+    if(SYSTEM_ARCH STREQUAL "aarch64")
+        set_property(TARGET ${name} APPEND_STRING PROPERTY LINK_FLAGS
+            " -Wl,--allow-shlib-undefined")
+    endif()
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
@@ -103,4 +135,3 @@ build_exec(main_api src/main_api.cpp)
 
 file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh")
 install(FILES ${RUN_SCRIPT} DESTINATION bin/)
-
