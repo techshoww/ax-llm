@@ -18,16 +18,36 @@ add_compile_options(-std=c++17)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# mnn
-option(MNN_BUILD_SHARED_LIBS "Build MNN as a shared library" OFF) # 明确写出帮助字符串是好习惯
-option(MNN_KLEIDIAI "Enable Kleidiai backend for MNN" OFF)
-option(MNN_AVX2 "Enable AVX2 optimization for MNN (x86_64 only)" OFF)
+# ONNX Runtime is shipped with the source tree for both supported build
+# targets.  Keep the selection based on CMAKE_SYSTEM_PROCESSOR so a native
+# x86 build and the aarch64 cross build use their matching runtime.
+string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" CMAKE_SYSTEM_PROCESSOR_LOWER)
+if(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86_64" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "amd64" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "x86" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i386" OR
+   CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "i686")
+    set(SYSTEM_ARCH "x86")
+    set(ONNXRUNTIME_ROOT
+        "${CMAKE_SOURCE_DIR}/third_party/onnxruntime-linux-x64-1.23.0")
+elseif(CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "aarch64" OR
+       CMAKE_SYSTEM_PROCESSOR_LOWER STREQUAL "arm64")
+    set(SYSTEM_ARCH "aarch64")
+    set(ONNXRUNTIME_ROOT
+        "${CMAKE_SOURCE_DIR}/third_party/onnxruntime-linux-aarch64-1.23.0")
+else()
+    message(FATAL_ERROR
+        "Unsupported processor '${CMAKE_SYSTEM_PROCESSOR}': ONNX Runtime package is unavailable")
+endif()
 
-set(SOME_LIBRARY_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/MNN)
-add_subdirectory(${SOME_LIBRARY_SOURCE_DIR} ${CMAKE_BINARY_DIR}/MNN)
+if(NOT EXISTS "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h" OR
+   NOT EXISTS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so")
+    message(FATAL_ERROR "ONNX Runtime is incomplete: ${ONNXRUNTIME_ROOT}")
+endif()
 
-
-include_directories(third_party/MNN/include/)
+message(STATUS "ONNX Runtime (${SYSTEM_ARCH}) = ${ONNXRUNTIME_ROOT}")
+include_directories("${ONNXRUNTIME_ROOT}/include")
+link_directories("${ONNXRUNTIME_ROOT}/lib")
 
 # bsp
 if(NOT BSP_MSP_DIR)
@@ -74,6 +94,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 function(build_exec name main_source)
     add_executable(${name} ${main_source}
                     src/runner/ax_model_runner/ax_model_runner_ax650.cpp 
+                    src/runner/BaseRunner.cpp
                     src/runner/utils/memory_utils.cpp 
                     src/runner/utils/cqdm.cpp
                     src/runner/Tokenizer/Tokenizer.cpp
@@ -85,13 +106,23 @@ function(build_exec name main_source)
 
     target_link_libraries(${name} ax_engine ax_interpreter ax_sys)
     target_link_libraries(${name} ${OpenCV_LIBS})
-    target_link_libraries(${name} MNN)
+    target_link_libraries(${name} onnxruntime)
+    # See the corresponding note in the AXCL ONNX Runtime branch: the
+    # prebuilt aarch64 runtime is linked against the board's versioned
+    # libstdc++, whereas the GNU 9.2 cross linker cannot resolve those
+    # versioned shared-library references itself.
+    if(SYSTEM_ARCH STREQUAL "aarch64")
+        set_property(TARGET ${name} APPEND_STRING PROPERTY LINK_FLAGS
+            " -Wl,--allow-shlib-undefined")
+    endif()
     install(TARGETS ${name} DESTINATION bin)
 endfunction()
 
 build_exec(main src/main.cpp)
 build_exec(main_api src/main_api.cpp)
 
+file(GLOB ONNXRUNTIME_RUNTIME_LIBS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime*.so*")
+install(FILES ${ONNXRUNTIME_RUNTIME_LIBS} DESTINATION lib)
+
 file(GLOB RUN_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/*.py" "${CMAKE_SOURCE_DIR}/scripts/*.sh")
 install(FILES ${RUN_SCRIPT} DESTINATION bin/)
-

@@ -20,9 +20,7 @@
 #include "timer.hpp"
 #include "opencv2/opencv.hpp"
 #include "ax_sys_api.h"
-#include "MNN/MNNDefine.h"
-#include "MNN/MNNForwardType.h"
-#include "MNN/Interpreter.hpp"
+#include "BaseRunner.hpp"
 
 class Token2Wav
 {
@@ -50,11 +48,8 @@ private:
     ax_runner_ax650 hift_p2_50_first;
     ax_runner_ax650 hift_p2_58;
 
-    std::shared_ptr<MNN::Interpreter> hift_p1_50_first = nullptr;
-    std::shared_ptr<MNN::Interpreter> hift_p1_58 = nullptr;
-
-    MNN::Session * sess_hift_p1_50_first = nullptr;
-    MNN::Session * sess_hift_p1_58 = nullptr;
+    std::shared_ptr<BaseRunner> hift_p1_50_first;
+    std::shared_ptr<BaseRunner> hift_p1_58;
 
 
     std::vector<float> rand_noise;
@@ -185,29 +180,35 @@ public:
             return false;
         }
 
-        MNN::ScheduleConfig config;
-        config.numThread = 2;
-        config.type      = static_cast<MNNForwardType>(MNN_FORWARD_CPU);
-        MNN::BackendConfig backendConfig;
-        backendConfig.precision = (MNN::BackendConfig::PrecisionMode)1;
-        config.backendConfig = &backendConfig;
-
-        hift_p1_50_first = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile( (model_dir+"/hift_p1_50_first.mnn").c_str() ));
-        if(nullptr == hift_p1_50_first)
+        hift_p1_50_first = CreateRunner(RT_OnnxRunner);
+        if(hift_p1_50_first == nullptr)
         {
-            ALOGE("init mnn model(%s) failed", (model_dir+"/hift_p1_50_first.mnn").c_str());
+            ALOGE("create ONNX runner for hift_p1_50_first failed");
             return false;
         }
-        sess_hift_p1_50_first = hift_p1_50_first->createSession(config);
-
-        hift_p1_58 = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile( (model_dir+"/hift_p1_58.mnn").c_str() ));
-        if(nullptr == hift_p1_58)
+        BaseConfig config_50{};
+        config_50.nthread = 8;
+        config_50.onnx_model = model_dir+"/hift_p1_50_first.onnx";
+        if (hift_p1_50_first->load(config_50) != 0)
         {
-            ALOGE("init mnn model(%s) failed", (model_dir+"/hift_p1_58.mnn").c_str() );
+            ALOGE("load ONNX model(%s) failed", config_50.onnx_model.c_str());
             return false;
         }
 
-        sess_hift_p1_58 = hift_p1_58->createSession(config);
+        hift_p1_58 = CreateRunner(RT_OnnxRunner);
+        if(hift_p1_58 == nullptr)
+        {
+            ALOGE("create ONNX runner for hift_p1_58 failed");
+            return false;
+        }
+        BaseConfig config_58{};
+        config_58.nthread = 8;
+        config_58.onnx_model = model_dir+"/hift_p1_58.onnx";
+        if (hift_p1_58->load(config_58) != 0)
+        {
+            ALOGE("load ONNX model(%s) failed", config_58.onnx_model.c_str());
+            return false;
+        }
 
         ALOGI("Token2Wav init ok");
         return true;
@@ -357,20 +358,17 @@ public:
     int infer_hift(std::vector<float> &mel, std::vector<float> &cache_source, 
                     std::vector<float> & tts_speech, std::vector<float> & tts_source)
     {
-        std::shared_ptr<MNN::Interpreter> model_p1;
-        MNN::Session * sess_p1;
+        std::shared_ptr<BaseRunner> model_p1;
         ax_runner_ax650 * model_p2;
         int len = mel.size()/(80);
         
         if(len == 50 && cache_source.empty())
         { 
             model_p1 = hift_p1_50_first;
-            sess_p1 = sess_hift_p1_50_first;
             model_p2 = &hift_p2_50_first;
         }else if(len == 58 && !cache_source.empty())
         {
             model_p1 = hift_p1_58;
-            sess_p1 = sess_hift_p1_58;
             model_p2 = &hift_p2_58;
         }else
         {
@@ -378,25 +376,16 @@ public:
             return -1;
         }
 
-        std::vector<int> dims{1, 80, len};
-        auto tensor = MNN::Tensor::create<float>(dims, NULL, MNN::Tensor::CAFFE);
-        auto p_tensor   = tensor->host<float>();
-        auto size   = tensor->size();
-        std::memcpy(p_tensor, mel.data(), size);
-        
-        auto inputTensor = model_p1->getSessionInput(sess_p1, nullptr);
-        inputTensor->copyFromHostTensor(tensor);
-        
-        model_p1->runSession(sess_p1);
-        
-        MNN::Tensor *p_out  = model_p1->getSessionOutput(sess_p1, "s");
-        MNN::Tensor out_host(p_out, p_out->getDimensionType());
-        p_out->copyToHostTensor(&out_host);
-        
-        auto p_s = out_host.host<float>();
+        float *p_input = model_p1->getInputPtr(0);
+        memcpy(p_input, mel.data(), mel.size() * sizeof(float));
+        if (model_p1->inference() != 0)
+        {
+            ALOGE("HIFT P1 ONNX inference failed");
+            return -1;
+        }
 
         void * p = model_p2->get_input("s").pVirAddr;
-        memcpy(p, p_s, len * 480 * sizeof(float));
+        memcpy(p, model_p1->getOutputPtr(0), len * 480 * sizeof(float));
         
         p = model_p2->get_input("mel").pVirAddr;
         memcpy(p, mel.data(), mel.size() * sizeof(float));
